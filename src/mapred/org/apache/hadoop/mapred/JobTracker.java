@@ -38,9 +38,12 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
+import java.util.Map.Entry;
+import java.util.PriorityQueue;
 import java.util.Properties;
 import java.util.Set;
 import java.util.TreeMap;
@@ -77,7 +80,6 @@ import org.apache.hadoop.mapred.JobStatusChangeEvent.EventType;
 import org.apache.hadoop.mapred.QueueManager.QueueACL;
 import org.apache.hadoop.mapred.TaskTrackerStatus.TaskTrackerHealthStatus;
 import org.apache.hadoop.mapreduce.ClusterMetrics;
-import org.apache.hadoop.mapreduce.Job;
 import org.apache.hadoop.mapreduce.TaskType;
 import org.apache.hadoop.mapreduce.security.token.DelegationTokenRenewal;
 import org.apache.hadoop.mapreduce.security.token.JobTokenSecretManager;
@@ -121,23 +123,31 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 	TaskTrackerManager, RefreshUserMappingsProtocol, RefreshAuthorizationPolicyProtocol,
 	AdminOperationsProtocol, JobTrackerMXBean {
 
-	// static JobConf conf_t;
 	static {
 		Configuration.addDefaultResource("mapred-default.xml");
 		Configuration.addDefaultResource("mapred-site.xml");
-		// Configuration.addDefaultResource("partitions-site.xml");
-		// NodeNum = Integer.parseInt(conf_t.get("NodeNum", ""));
+		//Configuration.addDefaultResource("partitions-site.xml");
 	}
 
-	// private static void InitializeMypartition() {
-	// NodeNum = Integer.parseInt(conf_t.get("NodeNum", ""));
-	// TotalMicropartition =
-	// Integer.parseInt(conf_t.get("TotalMicropartition",""));
-	// // ReduceNum = Integer.parseInt(conf.get("ReduceNum", ""));
-	// // DecisionNum = Integer.parseInt(conf.get("DecisionNum", ""));
-	// // OncePartitionNum = Integer.parseInt(conf.get("OncePartitionNum", ""));
-	// // IncreaseRate = Double.parseDouble(conf.get("IncreaseRate", ""));
-	// }
+	//	static {
+	//	Configuration.addDefaultResource("partitions-site.xml");
+	//}
+	//
+	//	private static void InitializeMypartitionMap(JobConf conf) {
+	//		PARTITION_EXPAND_FACTOR = Integer.parseInt(conf.get("amplifyps", ""));		
+	//	}
+
+	///**
+	// * add wzhuo 
+	// * init map
+	// */
+	//InitializeMypartitionMap(conf);
+	//LOG.info("!!!map="+PARTITION_EXPAND_FACTOR);
+	///**
+	// * add end 
+	// */   
+
+	//public static int PARTITION_EXPAND_FACTOR = 4;// 4*5=20  自己所加的放大系数
 	static long TASKTRACKER_EXPIRY_INTERVAL = 10 * 60 * 1000;
 	static long RETIRE_JOB_INTERVAL;
 	static long RETIRE_JOB_CHECK_INTERVAL;
@@ -146,26 +156,25 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 	private final DelegationTokenSecretManager secretManager;
 
 	// The maximum fraction (range [0.0-1.0]) of nodes in cluster allowed to be
-	// added to the all-jobs blacklist via heuristics. By default, no more than
+	// added to the all-jobs blacklist via heuristics.  By default, no more than
 	// 50% of the cluster can be heuristically blacklisted, but the external
 	// node-healthcheck script is not affected by this.
 	private static double MAX_BLACKLIST_FRACTION = 0.5;
 
 	// A tracker is blacklisted across jobs only if number of faults is more
 	// than X% above the average number of faults (averaged across all nodes
-	// in cluster). X is the blacklist threshold here; 0.3 would correspond
+	// in cluster).  X is the blacklist threshold here; 0.3 would correspond
 	// to 130% of the average, for example.
 	private double AVERAGE_BLACKLIST_THRESHOLD = 0.5;
 
 	// Fault threshold (number occurring within TRACKER_FAULT_TIMEOUT_WINDOW)
-	// to consider a task tracker bad enough to blacklist heuristically. This
+	// to consider a task tracker bad enough to blacklist heuristically.  This
 	// is functionally the same as the older "MAX_BLACKLISTS_PER_TRACKER" value.
 	private int TRACKER_FAULT_THRESHOLD; // = 4;
 
 	// Width of overall fault-tracking sliding window (in minutes). (Default
 	// of 24 hours matches previous "UPDATE_FAULTY_TRACKER_INTERVAL" value that
-	// was used to forgive a single fault if no others occurred in the
-	// interval.)
+	// was used to forgive a single fault if no others occurred in the interval.)
 	private int TRACKER_FAULT_TIMEOUT_WINDOW; // = 180 (3 hours)
 
 	// Width of a single fault-tracking bucket (in minutes).
@@ -182,297 +191,11 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 
 	// Delegation token related keys
 	public static final String DELEGATION_KEY_UPDATE_INTERVAL_KEY = "mapreduce.cluster.delegation.key.update-interval";
-	public static final long DELEGATION_KEY_UPDATE_INTERVAL_DEFAULT = 24 * 60 * 60 * 1000; // 1
-																							// day
+	public static final long DELEGATION_KEY_UPDATE_INTERVAL_DEFAULT = 24 * 60 * 60 * 1000; // 1 day
 	public static final String DELEGATION_TOKEN_RENEW_INTERVAL_KEY = "mapreduce.cluster.delegation.token.renew-interval";
-	public static final long DELEGATION_TOKEN_RENEW_INTERVAL_DEFAULT = 24 * 60 * 60 * 1000; // 1
-																							// day
+	public static final long DELEGATION_TOKEN_RENEW_INTERVAL_DEFAULT = 24 * 60 * 60 * 1000; // 1 day
 	public static final String DELEGATION_TOKEN_MAX_LIFETIME_KEY = "mapreduce.cluster.delegation.token.max-lifetime";
 	public static final long DELEGATION_TOKEN_MAX_LIFETIME_DEFAULT = 7 * 24 * 60 * 60 * 1000; // 7 days
-
-	/**
-	 * HostName_posion is Map<HostName,positon in pValue_num> pValue_num[i][j]:j
-	 * is the partition value,i is the no HostName in the
-	 * pValue_num,pValue_num[i][j] is the num of the partition value
-	 */
-	// public static int[] scheduledornot = new int[10];
-	public static Map<String, Integer> HostName_posion = new HashMap<String, Integer>();
-	public static int HostNum = 0;
-
-	/**
-	 * add 初始化分配策略的相关变量
-	 */
-	// 不同分配策略的初始化部分
-	public static int NodeNum = 10; // the node in the cluster
-	public static int TotalMicropartition = 200; // the total number of the micropartiton
-	public static int ReduceNum = 20; // the total number of reduce
-	public static int DecisionNum = 6; // 总分配的次数
-	public static int OncePartitionNum = 30; // time to assign
-	public static double IncreaseRate = 0.05; // the increase rate of the finished map when to Decision
-
-	/**
-	 * balance 的固定变量
-	 */
-	public static boolean LOCKDECISIONMODE = true; // the lock to the DecisionMode
-	public static double DECISIONTIME = 0.0; // the lock to the DecisionMode
-	public static int ONECDECISIONFINISHED = 0; // ensure the candidate have assigned in one Decision
-	public static long[] Reduceload = new long[ReduceNum]; // 各个Reduce上分配的数据量
-	public static Map<Integer, Long> ReduceLoad = new HashMap<Integer, Long>(); // 各个Reduce上分配的数据量
-
-	public static int DecisionedNum = 0; // 已经分配的次数
-	public static double NowTimetoDecision = 0.0; // the start time to assign partition
-
-	// public static int Restpartitionnum = TotalMicropartition - ReduceNum;
-	// 剩下的子分区的个数
-	public static long[][] pValue_num = new long[NodeNum][ReduceNum * MapTask.PARTITION_EXPAND_FACTOR];
-	public Map<Integer, HashMap> pvalue_num = new HashMap<Integer, HashMap>();
-
-	// have assigned <P，task>
-	public Map<Integer, TaskAttemptID> ReduceTaskIds = new HashMap<Integer, TaskAttemptID>();
-	// 存储已经分配的<P，R>对
-	public Map<TaskAttemptID, LinkedList<Integer>> AssedTaskHaveMicro = new HashMap<TaskAttemptID, LinkedList<Integer>>();
-	// 存储尚ready to assign分配的<P，R>对
-	public Map<Integer, LinkedList<Integer>> NotAssedParHaveMirco = new HashMap<Integer, LinkedList<Integer>>();
-	// 存放 assigned 得分区
-	public LinkedList<Integer> SchedParEachRound = new LinkedList<Integer>();
-	// 存放 the selected 分区
-	public LinkedList<Integer> CandidatePart = new LinkedList<Integer>();
-
-	/*********************
-	 * add balance begin
-	 ********************/
-	/**
-	 * 执行一次决策，分配若干个子分区
-	 * 
-	 * @return
-	 * @throws IOException
-	 */
-	public boolean DecisionModel() throws IOException {
-
-		LOCKDECISIONMODE = false;
-		long[][] tmp_pValue_num = new long[NodeNum][ReduceNum * MapTask.PARTITION_EXPAND_FACTOR];
-		tmp_pValue_num = pValue_num.clone();
-
-		// jobtracke收集后的采样结果
-		// LOG.info("tmp_pvalue_num!!!!!!!!" + tmp_pvalue_num);
-		Map<Integer, Long> pnum = new HashMap<Integer, Long>();
-		// pnum = tmp_pValue_num.length;
-
-		// 计算各个分区的总数据量，结合之前已经分配的分区信息，找到各个reduce的负载量
-		int row = HostName_posion.size();
-		// LOG.info("row is !!!!!!"+row);
-		int col = ReduceNum * MapTask.PARTITION_EXPAND_FACTOR;
-		// LOG.info("col is !!!!!!"+col);
-		long[] p_now = new long[col]; // 该数组存放分区总的元组zong数
-		// init
-		for (int i = 0; i < col; i++) {
-			p_now[i] = 0;
-		}
-		// 各子分区总的元组个数
-		for (int i = 0; i < col; i++) {
-			for (int j = 0; j < row; j++) {
-				p_now[i] += tmp_pValue_num[j][i];
-			}
-		}
-
-		// 各个reduce目前的被分配到的总元组个数
-		long[] Reduceload = new long[ReduceNum];
-
-		// init each reduce's load
-		for (int i = 0; i < ReduceNum; i++) {
-			Reduceload[i] = 0;
-		}
-
-		// updata each reduce' load
-		for (int i = 0; i < ReduceNum; i++) {
-			TaskAttemptID s;
-			s = ReduceTaskIds.get(i);
-			LinkedList<Integer> list = new LinkedList<Integer>();
-			list = AssedTaskHaveMicro.get(s);
-			if (list.isEmpty() == false) {
-				Iterator<Integer> itr = list.iterator();
-				while (itr.hasNext()) {
-					int k = itr.next();
-					Reduceload[i] += p_now[k];
-				}
-			}
-			// LOG.info("the DecisionedNum is "+ DecisionedNum +
-			// " the ReduceTaskIds is "+ ReduceTaskIds);
-		}
-
-		// 设置一个标志位-1未分配
-		int[] p_candidate = new int[OncePartitionNum];// 存放要分配的分区
-		for (int i = 0; i < OncePartitionNum; i++) {
-			p_candidate[i] = -1;
-		}
-
-		long[] p_now_tmp = new long[col];// 该数组存放各子分区总的元组个数
-		long[] p_now_tmp1 = new long[col]; // index of 该数组存放各子分区总的元组个数
-
-		p_now_tmp = p_now.clone();
-
-		// record the index
-		for (int j = 0; j < col; j++) {
-			p_now_tmp1[j] = j;
-		}
-
-		// select the candidate from the restpartition
-		for (int i = 0; i < col; i++) {
-			for (int j = i + 1; j < col; j++) {
-				if (p_now_tmp[i] < p_now_tmp[j]) {
-					long temp = p_now_tmp[i];
-					p_now_tmp[i] = p_now_tmp[j];
-					p_now_tmp[j] = temp;
-
-					long temp1 = p_now_tmp1[i];
-					p_now_tmp1[i] = p_now_tmp1[j];
-					p_now_tmp1[j] = temp1;
-				}
-			}
-		}
-
-//		 for(int i=ReduceNum;i<col;i++)
-//		 {
-//		 // System.out.println(" p_now_tmp = " + p_now_tmp[i]);
-//		 LOG.info(" p_now_tmp1 !!!!!!!= " + p_now_tmp1[i]);
-//		 }
-
-		int flag = 0;
-		// add the oncePartitionNum bigger partition in to the linklist
-		for (int k = 0; k < col; k++) {
-			if (CandidatePart.contains((int) p_now_tmp1[k]) == false) {
-				p_candidate[flag] = (int) p_now_tmp1[k];
-				CandidatePart.add((int) p_now_tmp1[k]);
-				flag++;
-				if (flag == OncePartitionNum)
-					break;
-			}
-		}
-
-		int factPartitionNum = 0;// p[]实际存放的分区的个数
-		for (int i = 0; i < OncePartitionNum; i++) {
-			if (p_candidate[i] == -1)
-				break;
-			factPartitionNum++;
-			ONECDECISIONFINISHED++;
-		}
-
-		// define the matrix to assign the partition by wzhuo
-		int[][] assignmatrix = new int[ReduceNum][OncePartitionNum];
-		int min = 0;
-
-		for (int i = 0; i < ReduceNum; i++) {
-			for (int j = 0; j < OncePartitionNum; j++) {
-				assignmatrix[i][j] = -1;
-			}
-		}
-
-		// the greedy to assign the partition to reduce
-		for (int a_times = 0; a_times < factPartitionNum; a_times++) {
-			min = 0;
-
-			for (int j = 0; j < ReduceNum; j++) {
-				if (Reduceload[min] > Reduceload[j])
-					min = j;
-			}
-
-			Reduceload[min] = Reduceload[min] + p_now_tmp[p_candidate[a_times]];
-
-			// LOG.info("Reduceloadmin is " + min + " size is " +
-			// p_now_tmp[p_candidate[a_times]] +"max is " +
-			// p_candidate[a_times]);
-
-			for (int i = 0; i < OncePartitionNum; i++) {
-				if (assignmatrix[min][i] == -1) {
-					assignmatrix[min][i] = p_candidate[a_times];
-					break;
-				}
-			}
-		}
-		// ////////////////////////////////
-		// 启发方法，调整greedy选取的结果
-		int maxload = 0;
-		int minload = Integer.MAX_VALUE;
-		int sumload = 0;
-		int max_x = 0;
-		int max_y = 0;
-		int min_x = 0;
-		int min_y = 0;
-		int loop = 0;
-		int flagMax = 0;
-		int eachmax = 0;
-		int eachmin = Integer.MAX_VALUE;
-		int freshmaxload = 0;
-
-		while (loop < 5) {
-			// 查询出每轮中，最大负载节点和最小负载节点的下标
-			for (int i = 0; i < ReduceNum; i++) {
-				sumload = 0;
-				for (int j = 0; j < OncePartitionNum; j++) {
-					if (assignmatrix[i][j] != -1) {
-						sumload += assignmatrix[i][j];
-					}
-				}
-				if (sumload > maxload) {
-					maxload = sumload;
-					max_x = i;
-					flagMax = 1;
-				}
-				if (sumload < minload) {
-					minload = sumload;
-					min_x = i;
-					flagMax = 2;
-				}
-			}
-
-			if (flagMax == 1) {
-				for (int i = 0; i < OncePartitionNum; i++) {
-					if ((eachmax < assignmatrix[max_x][i]) && (assignmatrix[max_x][i] != -1)) {
-						eachmax = (int) assignmatrix[max_x][i];
-						max_y = i;
-					}
-				}
-			}
-			if (flagMax == 2) {
-				for (int i = 0; i < OncePartitionNum; i++) {
-					if ((eachmin > assignmatrix[min_x][i]) && (assignmatrix[min_x][i] != -1)) {
-						eachmin = assignmatrix[min_x][i];
-						min_y = i;
-					}
-				}
-			}
-
-			freshmaxload = maxload - assignmatrix[max_x][max_y] + assignmatrix[min_x][min_y];
-
-			if (freshmaxload < maxload) {
-				int temp = assignmatrix[min_x][min_y];
-				assignmatrix[min_x][min_y] = assignmatrix[max_x][max_y];
-				assignmatrix[max_x][max_y] = temp;
-			} else {
-				break;
-			}
-			loop++;
-		}
-
-		// ///////////////////////////////////////
-		// add the matrix to the NotAssedParHaveMirco
-		for (int i = 0; i < ReduceNum; i++) {
-			LinkedList<Integer> list = new LinkedList<Integer>();
-			// all the mircopartiton for one reduce in one time
-			for (int j = 0; j < OncePartitionNum; j++) {
-				if (assignmatrix[i][j] > -1) {
-					list.add(assignmatrix[i][j]);
-				}
-			}
-			NotAssedParHaveMirco.put(i, list);
-		}
-
-		return true;
-	}
-
-	/*********************
-	 * add balance end
-	 ********************/
 
 	// Approximate number of heartbeats that could arrive JobTracker
 	// in a second
@@ -510,7 +233,7 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 	private final List<JobInProgressListener> jobInProgressListeners = new CopyOnWriteArrayList<JobInProgressListener>();
 
 	private static final LocalDirAllocator lDirAlloc = new LocalDirAllocator("mapred.local.dir");
-	// system directory is completely owned by the JobTracker
+	//system directory is completely owned by the JobTracker
 	final static FsPermission SYSTEM_DIR_PERMISSION = FsPermission.createImmutable((short) 0700); // rwx------
 
 	// system files should have 700 permission
@@ -568,11 +291,366 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 	private Thread hdfsMonitor;
 
 	/**
+	 * add static balance begin
+	 * 
+	 * @author wzhuo
+	 * @功能 定义相关结构体
+	 */
+	//用于记录各micro分区的信息
+	public class MicPMes {
+		public int micPID; //小分区的编号
+		public long micPValue; //小分区的数据量
+
+		//public TaskAttemptID reduceId; //小分区所在的reduce节点
+
+		@Override
+		public int hashCode() {
+			return micPID;
+		}
+
+		@Override
+		public boolean equals(Object obj) {
+			MicPMes other = (MicPMes) obj;
+			return micPID == other.micPID;
+		}
+
+		@Override
+		public String toString() {
+			return "[micPID=" + micPID + ", micPValue=" + micPValue + "]";
+		}
+	}
+
+	//public static int LOCKDECISIONMODE = 2; // the lock to the DecisionMode
+	public static double JobProgressingTime = 0.0; // the lock to the DecisionMode
+	public static boolean FINISHEDALL = true;
+
+	//用于表示采样信息所在节点的链表
+	public List<String> TaskNameList = new LinkedList<String>();
+	//用于记录所有分区的链表,各节点存放内容<micPID,MicPMes>；全局分区的数据量描述
+	public Map<Integer, MicPMes> GlobalSampleTabs = new HashMap<Integer, MicPMes>();
+	//记录各节点采样的结果,各节点存放内容<nodeName,各节点分区统计的hashmap表>
+	public Map<String, HashMap<Integer, Long>> LocalSampleTabs = new HashMap<String, HashMap<Integer, Long>>();
+
+	//定义所有未分配分区的集合,形式为<micPValue, micPID>
+	public Map<Integer, Long> UnAssiMicP = new HashMap<Integer, Long>();
+	//定义已分配分区的链表
+	public List<Integer> AssiMicP = new LinkedList<Integer>();
+	//定义已完成分配的Reducetask
+	public Map<TaskAttemptID, String> ReduceFinished = new HashMap<TaskAttemptID, String>();
+	//定义当前决策时各Reduce的负载量 <ReduceTaskId, 该节点上总的负载量>
+	public Map<TaskAttemptID, Long> ReduceLoad = new HashMap<TaskAttemptID, Long>();
+	//定义ReduceFinished链表
+	//public Map<TaskAttemptID, String> ReduceFinished = new HashMap<TaskAttemptID, String>();
+	//各Reduce上所有分区的信息<TaskId, <MicroPlist>>
+	public Map<TaskAttemptID, LinkedList<Integer>> ReduceCoMicPs = new HashMap<TaskAttemptID, LinkedList<Integer>>();
+	//每轮的决策方案，只有已当当前轮分配完成后，才开始下轮的分配
+	public Map<TaskAttemptID, LinkedList<Integer>> EachAssPlan = new HashMap<TaskAttemptID, LinkedList<Integer>>();
+
+	/************************************************
+	 * 
+	 * @功能 定义方法实现
+	 * @author wzhuo
+	 * 
+	 *         1.UpdateSampleTabs 采样结果的收集和汇总 2.DecisionModel 分配计划的制订
+	 *         2.DecisionModel 制订分配计划 3.addMicPartition
+	 *         将决策后的链表添加到获取分区的动作中，每次取出属于该task的所有分区 4.getAllonAtask
+	 *         将属于该task的所有分区从制订的分区计划中取出，返回一个数组
+	 * 
+	 * 
+	 ************************************************/
+	//1.采样结果的收集,每次更新localTabls
+	public void UpdateLocalSampleTabs(String localSampleMess, String mapTaskId) {
+		HashMap<Integer, Long> localtoalsample = new HashMap<Integer, Long>();
+		/**
+		 * example info:{3=0, 2=0, 1=0, 0=0}
+		 */
+		localSampleMess = localSampleMess.replace("{", "");
+		localSampleMess = localSampleMess.replaceAll(" ", "");
+		localSampleMess = localSampleMess.replace("}", "");
+
+		/**
+		 * example info:3=0,2=0,1=0,0=0 解析各Task传过来的Mes，将采样信息放到GlobalSampleTable中
+		 */
+		if (localSampleMess.length() > 1) {
+			String[] mes = localSampleMess.split(",");
+			if (mes.length > 0) {
+				long total = 0;
+				//一个节点一次传送的信息
+				for (int i = 0; i < mes.length; i++) {
+					String[] finallocalTable = mes[i].split("=");
+					int localMicroParId = Integer.valueOf(finallocalTable[0]);
+					Long localMicroParNum = Long.valueOf(finallocalTable[1]);
+					localtoalsample.put(localMicroParId, localMicroParNum);
+				}
+				//更新该节点最新的采样结果
+				LocalSampleTabs.put(mapTaskId, localtoalsample);
+			}
+		}
+		//LOG.info("LocalSampleTabssssss" + LocalSampleTabs);
+	}
+
+	//2.更新global表
+	public void UpdateGlobalSampleTabs() {
+		//每次决策时，初始化GlobalSample表，因为LocalSample中采样的是以前所有分区的和
+		Iterator globaliter = LocalSampleTabs.entrySet().iterator();
+		while (globaliter.hasNext()) {
+			Map.Entry nodeent = (Map.Entry) globaliter.next();
+			HashMap<Integer, Long> globaltent = (HashMap<Integer, Long>) nodeent.getValue();
+
+			//初始化GlobalTables
+			for (int i = 0; i < globaltent.size(); i++) {
+				MicPMes mpm = new MicPMes();
+				//将采样的结果记录到放分区的链表中
+				mpm.micPID = i;
+				mpm.micPValue = 0;
+				GlobalSampleTabs.put(mpm.micPID, mpm);
+			}
+			break; //只需要对第一个Task进行赋值
+		}
+
+		//LOG.info("GlobalSampleTabs_init####={" + GlobalSampleTabs + "}");
+
+		//更新全局采样结果表，即将各节点的结果进行汇总
+		Iterator nodeiter = LocalSampleTabs.entrySet().iterator();
+		//遍历各节点，取出相同的分区值
+		while (nodeiter.hasNext()) {
+			Map.Entry nodeent = (Map.Entry) nodeiter.next();
+			//String nodeID = (String) nodeent.getKey();
+			HashMap<Integer, Long> eachnodesample = (HashMap) nodeent.getValue();
+
+			//遍历一个节点的所有分区并取出值
+			Iterator enpvaluiter = eachnodesample.entrySet().iterator();
+			while (enpvaluiter.hasNext()) {
+				long total = 0;
+				Map.Entry mpent = (Map.Entry) enpvaluiter.next();
+				int mid = (Integer) mpent.getKey();
+				long mval = (Long) mpent.getValue();
+
+				MicPMes mpm = new MicPMes();
+				//将采样的结果记录到放分区的链表中
+				mpm.micPID = mid;
+				mpm.micPValue = mval;
+
+				if (GlobalSampleTabs.containsKey(mid)) {
+					total = GlobalSampleTabs.get(mid).micPValue;
+					MicPMes npmes = new MicPMes();
+					npmes.micPID = mid;
+					npmes.micPValue = total + mval;
+					GlobalSampleTabs.put(mid, npmes);
+				}
+			}
+		}
+		//LOG.info("GlobalSampleTabs####={" + GlobalSampleTabs + "}");
+	}
+
+	//3.制订分配计划
+	public boolean DecisionModel() throws IOException {
+
+		//LOCKDECISIONMODE--;
+		//每次决策是首先初始化ReduceLoad
+		Iterator initloadite = ReduceLoad.entrySet().iterator();
+		while (initloadite.hasNext()) {
+			Map.Entry loadentent = (Map.Entry) initloadite.next();
+			TaskAttemptID micidi = (TaskAttemptID) loadentent.getKey();
+			ReduceLoad.put(micidi, (long) 0);
+		}
+
+		//每次决策前先更新全局的采样结果
+		UpdateGlobalSampleTabs();
+
+		//遍历GlobalSampleTabs,更新所有分区和reduce当前决策时的负载量
+		Iterator gloablsampliter = GlobalSampleTabs.entrySet().iterator();
+		while (gloablsampliter.hasNext()) {
+			Map.Entry unasspent = (Map.Entry) gloablsampliter.next();
+			Integer micid = (Integer) unasspent.getKey();
+			MicPMes micmes = (MicPMes) unasspent.getValue();
+
+			//更新未分配分区的采样量
+			if (UnAssiMicP.containsKey(micid)) {
+				UnAssiMicP.put(micid, micmes.micPValue);
+			} else {
+				//更新当前reduce的负载量,通过判断已分配分区信息
+				Iterator redConPsiter = ReduceCoMicPs.entrySet().iterator();
+				while (redConPsiter.hasNext()) {
+					Map.Entry redConPsent = (Map.Entry) redConPsiter.next();
+					TaskAttemptID reduceTaskid = (TaskAttemptID) redConPsent.getKey();
+					LinkedList redcoPlist = (LinkedList) redConPsent.getValue();
+
+					//LOG.info("redcoPlist##=" + redcoPlist + "}");
+					//更新已分配分区所在的reduce的负载量
+					if (redcoPlist.contains(micid)) {
+						ReduceLoad.put(reduceTaskid, micmes.micPValue + ReduceLoad.get(reduceTaskid));
+					}
+					//LOG.info("ReduceLoad={"+ReduceLoad + "}");
+				}
+			}
+		}
+		//LOG.info("EachD_UnB##=" + UnAssiMicP + "}");
+		//LOG.info("ReduceLoad_B@@={" + ReduceLoad + "}");
+
+		//分配算法
+		Map<Integer, Long> oneAssiPs = new HashMap<Integer, Long>();
+		oneAssiPs.putAll(UnAssiMicP);
+		//（1）取出未分配分区的个数,每次取出剩余的一半
+		//int onceAssPNum = UnAssiMicP.size() / 2 + 1;
+		int onceAssPNum = 0;
+		if(JobInProgress.finishedMapTasks== JobInProgress.numMapTasks){
+			onceAssPNum = UnAssiMicP.size();
+		}else{
+			onceAssPNum = GlobalSampleTabs.size()/MapTask.PARTITION_EXPAND_FACTOR;	
+		}
+		
+		while (onceAssPNum > 0) {
+			long maxPValue = 0; //记录最大负载分区的量
+			int maxPID = 0; //记录量最大负载分区所对应的分区值
+			long minLValude = Long.MAX_VALUE; //用于记录最小负载节点的量
+			TaskAttemptID minLID = null; //用于记录最小负载节点的量
+
+			//取出负载量最大的分区进行分配
+			Iterator oneasspitor = oneAssiPs.entrySet().iterator();
+			while (oneasspitor.hasNext()) {
+				Map.Entry oneasspent = (Map.Entry) oneasspitor.next();
+				Integer onceasspid = (Integer) oneasspent.getKey();
+				Long onceasspval = (Long) oneasspent.getValue();
+				if (onceasspval > maxPValue) {
+					maxPValue = onceasspval;
+					maxPID = onceasspid;
+				}
+			}
+
+			//LOG.info("maxPValue={"+maxPValue+"};maxPID={"+maxPID+"}");
+
+			//取出现有负载量最小的reducetask
+			Iterator oneloaditor = ReduceLoad.entrySet().iterator();
+			while (oneloaditor.hasNext()) {
+				Map.Entry oneloadent = (Map.Entry) oneloaditor.next();
+				TaskAttemptID onereuceid = (TaskAttemptID) oneloadent.getKey();
+				Long oneredload = (Long) oneloadent.getValue();
+				if (oneredload < minLValude) {
+					minLValude = oneredload;
+					minLID = onereuceid;
+				}
+			}
+			//LOG.info("minLValude={"+minLValude+"};minLID={"+minLID+"}");
+
+			//将最大负载量的分区加入到最小负载的节点上
+			Iterator eachplaniter = ReduceCoMicPs.entrySet().iterator();
+			while (eachplaniter.hasNext()) {
+				Map.Entry eachtaskent = (Map.Entry) eachplaniter.next();
+				TaskAttemptID eachtaskid = (TaskAttemptID) eachtaskent.getKey();
+				LinkedList<Integer> partoreduce = (LinkedList<Integer>) eachtaskent.getValue();
+
+				//更新分配之后的负载量
+				if (eachtaskid == minLID) {
+					partoreduce.add(maxPID);
+
+					//更新每次的决策链表
+					if (EachAssPlan.containsKey(eachtaskid)) {
+						LinkedList<Integer> eachlist = new LinkedList<Integer>();
+						eachlist.addAll(EachAssPlan.get(eachtaskid));
+						eachlist.add(maxPID);
+						EachAssPlan.put(eachtaskid, eachlist);
+					} else {
+						LinkedList<Integer> eachlist1 = new LinkedList<Integer>();
+						eachlist1.add(maxPID);
+						EachAssPlan.put(eachtaskid, eachlist1);
+					}
+					ReduceLoad.put(eachtaskid, maxPValue + ReduceLoad.get(eachtaskid)); //更新最大负载节点
+					oneAssiPs.remove(maxPID); //更新未分配的链表
+					UnAssiMicP.remove(maxPID);
+				}
+			}
+			onceAssPNum--;
+		}
+		//LOG.info("EachD_UnA##=" + UnAssiMicP + "}");
+		//LOG.info("EachAssPlan!!={" + EachAssPlan + "}");
+		//LOG.info("ReduceLoad_A@@@@=" + ReduceLoad + "}");
+
+		return true;
+	}
+
+	//4.将决策后的链表添加到获取分区的动作中，每次取出属于该task的所有分区
+	private List<TaskTrackerAction> addMicPartition(String trackerName) {
+		//返回属于该trackerName的所有新增分区链表
+		List<TaskTrackerAction> addPartitionList = new ArrayList<TaskTrackerAction>();
+		Set<TaskAttemptID> taskIds = trackerToTaskMap.get(trackerName);
+
+		if (taskIds == null)
+			return null;
+		for (TaskAttemptID taskId : taskIds) {
+			// LOG.info(trackerName+"上面运行的taskid是"+taskId);
+			if (taskId.isMap()) {
+				JobStatus thisjobstatus = getJobStatus(taskId.getJobID());
+				JobProgressingTime = thisjobstatus.mapProgress();
+				continue;
+			}
+
+			String thisRIdfinished = ReduceFinished.get(taskId);
+
+			//当前reducetask还未完成
+			if (thisRIdfinished.equals("true")) {
+				addPartitionList.add(new AddPartitionAction(taskId, new int[0], true));
+				LOG.info("addPartitionList_1add@@{" + addPartitionList + "}");
+				continue;
+			} else {
+				LinkedList<Integer> toArrPart = EachAssPlan.get(taskId);
+
+				if (toArrPart == null) {
+					//判断是否整体完成
+					if (AssiMicP.size() == GlobalSampleTabs.size()) {
+						ReduceFinished.put(taskId, "true");
+						addPartitionList.add(new AddPartitionAction(taskId, new int[0], true));
+						LOG.info("addPartitionList_2add@@{" + ReduceFinished + "}");
+					}
+					continue;
+				} else {
+					for (int i = 0; i < toArrPart.size(); i++) {
+							if (!AssiMicP.contains(toArrPart.get(i))) {
+								AssiMicP.add(toArrPart.get(i));
+								LOG.info("InitAssiMicP.size()={" + AssiMicP.size() + "}{"
+									+ GlobalSampleTabs.size() + "}");
+							}
+							if((JobProgressingTime == 1.0) && (toArrPart.get(i) == 0) ){
+								AssiMicP.add(toArrPart.get(i));
+								LOG.info("All0AssiMicP.size()={" + AssiMicP.size() + "}{"
+									+ GlobalSampleTabs.size() + "}");
+							}
+					}
+
+					//判断是否整体完成
+					if (AssiMicP.size() == GlobalSampleTabs.size()) {
+						ReduceFinished.put(taskId, "true");
+						addPartitionList.add(new AddPartitionAction(taskId, toArrPart, true));
+						LOG.info("addPartitionList_3add@@" + addPartitionList);
+						LOG.info("AssiMicP.size()={" + AssiMicP.size() + "}{" + GlobalSampleTabs.size() + "}");
+					} else {
+						addPartitionList.add(new AddPartitionAction(taskId, toArrPart, false));
+						LOG.info("addPartitionList_4add@@" + addPartitionList);
+						LOG.info("AssiMicP.size()={" + AssiMicP.size() + "}{" + GlobalSampleTabs.size() + "}");
+					}
+					EachAssPlan.remove(taskId);
+					//return addPartitionList;
+				}
+			}
+			return addPartitionList;
+		}
+		return addPartitionList;
+	}
+
+	/*********************
+	 * 
+	 * @功能 定义方法实现
+	 * 
+	 *     add static balance end
+	 * 
+	 ********************/
+
+	/**
 	 * Start the JobTracker with given configuration.
 	 * 
 	 * The conf will be modified to reflect the actual ports on which the
 	 * JobTracker is up and running if the user passes the port as
-	 * <code>zero</code>. german_r20.jar
+	 * <code>zero</code>.
 	 * 
 	 * @param conf
 	 *            configuration for the JobTracker.
@@ -612,6 +690,7 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 			Thread.sleep(1000);
 		}
 		if (result != null) {
+
 			JobEndNotifier.startNotifier();
 			MBeans.register("JobTracker", "JobTrackerInfo", result);
 			if (initialize == true) {
@@ -689,12 +768,9 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 										String trackerName = getAssignedTracker(taskId);
 										TaskTrackerStatus trackerStatus = getTaskTrackerStatus(trackerName);
 
-										// This might happen when the
-										// tasktracker has already
-										// expired and this thread tries to call
-										// failedtask
-										// again. expire tasktracker should have
-										// called failed
+										// This might happen when the tasktracker has already
+										// expired and this thread tries to call failedtask
+										// again. expire tasktracker should have called failed
 										// task!
 										if (trackerStatus != null)
 											job.failedTask(tip, taskId, "Error launching task", tip
@@ -704,10 +780,8 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 									}
 									itr.remove();
 								} else {
-									// the tasks are sorted by start time, so
-									// once we find
-									// one that we want to keep, we are done for
-									// this cycle.
+									// the tasks are sorted by start time, so once we find
+									// one that we want to keep, we are done for this cycle.
 									break;
 								}
 							}
@@ -736,9 +810,9 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 		}
 	}
 
-	// /////////////////////////////////////////////////////
+	///////////////////////////////////////////////////////
 	// Used to expire TaskTrackers that have gone down
-	// /////////////////////////////////////////////////////
+	///////////////////////////////////////////////////////
 	class ExpireTrackers implements Runnable {
 		public ExpireTrackers() {
 		}
@@ -751,10 +825,8 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 			while (true) {
 				try {
 					//
-					// Thread runs periodically to check whether trackers should
-					// be expired.
-					// The sleep interval must be no more than half the maximum
-					// expiry time
+					// Thread runs periodically to check whether trackers should be expired.
+					// The sleep interval must be no more than half the maximum expiry time
 					// for a task tracker.
 					//
 					Thread.sleep(TASKTRACKER_EXPIRY_INTERVAL / 3);
@@ -765,14 +837,10 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 					// Need to lock the JobTracker here since we are
 					// manipulating it's data-structures via
 					// ExpireTrackers.run -> JobTracker.lostTaskTracker ->
-					// JobInProgress.failedTask ->
-					// JobTracker.markCompleteTaskAttempt
-					// Also need to lock JobTracker before locking 'taskTracker'
-					// &
+					// JobInProgress.failedTask -> JobTracker.markCompleteTaskAttempt
+					// Also need to lock JobTracker before locking 'taskTracker' &
 					// 'trackerExpiryQueue' to prevent deadlock:
-					// @see {@link
-					// JobTracker.processHeartbeat(TaskTrackerStatus, boolean,
-					// long)}
+					// @see {@link JobTracker.processHeartbeat(TaskTrackerStatus, boolean, long)} 
 					synchronized (JobTracker.this) {
 						synchronized (taskTrackers) {
 							synchronized (trackerExpiryQueue) {
@@ -786,26 +854,21 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 									trackerExpiryQueue.remove(leastRecent);
 									String trackerName = leastRecent.getTrackerName();
 
-									// Figure out if last-seen time should be
-									// updated, or if tracker is dead
+									// Figure out if last-seen time should be updated, or if tracker is dead
 									TaskTracker current = getTaskTracker(trackerName);
 									TaskTrackerStatus newProfile = (current == null) ? null : current
 										.getStatus();
-									// Items might leave the taskTracker set
-									// through other means; the
-									// status stored in 'taskTrackers' might be
-									// null, which means the
+									// Items might leave the taskTracker set through other means; the
+									// status stored in 'taskTrackers' might be null, which means the
 									// tracker has already been destroyed.
 									if (newProfile != null) {
 										if ((now - newProfile.getLastSeen()) > TASKTRACKER_EXPIRY_INTERVAL) {
 											removeTracker(current);
-											// remove the mapping from the hosts
-											// list
+											// remove the mapping from the hosts list
 											String hostname = newProfile.getHost();
 											hostnameToTaskTracker.get(hostname).remove(trackerName);
 										} else {
-											// Update time by inserting latest
-											// profile
+											// Update time by inserting latest profile
 											trackerExpiryQueue.add(newProfile);
 										}
 									}
@@ -825,14 +888,14 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 
 	synchronized void historyFileCopied(JobID jobid, String historyFile) {
 		JobInProgress job = getJob(jobid);
-		if (job != null) { // found in main cache
+		if (job != null) { //found in main cache
 			if (historyFile != null) {
 				job.setHistoryFile(historyFile);
 			}
 			return;
 		}
 		RetireJobInfo jobInfo = retireJobs.get(jobid);
-		if (jobInfo != null) { // found in retired cache
+		if (jobInfo != null) { //found in retired cache
 			if (historyFile != null) {
 				jobInfo.setHistoryFile(historyFile);
 			}
@@ -864,9 +927,9 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 		}
 	}
 
-	// /////////////////////////////////////////////////////
+	///////////////////////////////////////////////////////
 	// Used to remove old finished Jobs that have been around for too long
-	// /////////////////////////////////////////////////////
+	///////////////////////////////////////////////////////
 	class RetireJobs implements Runnable {
 		private final Map<JobID, RetireJobInfo> jobIDStatusMap = new HashMap<JobID, RetireJobInfo>();
 		private final LinkedList<RetireJobInfo> jobRetireInfoQ = new LinkedList<RetireJobInfo>();
@@ -969,8 +1032,7 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 										LOG.info("Retired job with id: '" + job.getProfile().getJobID()
 											+ "' of user '" + jobUser + "'");
 
-										// clean up job files from the local
-										// disk
+										// clean up job files from the local disk
 										JobHistory.JobInfo.cleanupJob(job.getProfile().getJobID());
 										addToCache(job);
 									}
@@ -991,7 +1053,7 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 		EXCEEDING_FAILURES, NODE_UNHEALTHY
 	}
 
-	// FaultInfo: data structure that tracks the number of faults of a single
+	// FaultInfo:  data structure that tracks the number of faults of a single
 	// TaskTracker, when the last fault occurred, and whether the TaskTracker
 	// is blacklisted across all jobs or not.
 	private static class FaultInfo {
@@ -1017,14 +1079,13 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 			grayRfbMap = new HashMap<ReasonForBlackListing, String>();
 		}
 
-		// timeStamp is presumed to be "now": there are no checks for past or
+		// timeStamp is presumed to be "now":  there are no checks for past or
 		// future values, etc.
 		private void checkRotation(long timeStamp) {
 			long diff = timeStamp - lastRotated;
 			// find index of the oldest bucket(s) and zero it (or them) out
 			while (diff > bucketWidth) {
-				// this is now the 1st millisecond of the oldest bucket, in a
-				// modular-
+				// this is now the 1st millisecond of the oldest bucket, in a modular-
 				// arithmetic sense (i.e., about to become the newest bucket):
 				lastRotated += bucketWidth;
 				// corresponding bucket index:
@@ -1036,8 +1097,7 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 		}
 
 		private int bucketIndex(long timeStamp) {
-			// stupid Java compiler thinks an int modulus can produce a long,
-			// sigh...
+			// stupid Java compiler thinks an int modulus can produce a long, sigh...
 			return (int) ((timeStamp / bucketWidth) % numFaultBuckets);
 		}
 
@@ -1091,8 +1151,7 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 			return (gray ? this.grayRfbMap.keySet() : this.blackRfbMap.keySet());
 		}
 
-		// no longer on the blacklist (or graylist), but we're still tracking
-		// any
+		// no longer on the blacklist (or graylist), but we're still tracking any
 		// faults in case issue is intermittent => don't clear numFaults[]
 		public void unBlacklist(boolean gray) {
 			if (gray) {
@@ -1122,11 +1181,11 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 	private class FaultyTrackersInfo {
 		// A map from hostName to its faults
 		private Map<String, FaultInfo> potentiallyFaultyTrackers = new HashMap<String, FaultInfo>();
-		// This count gives the number of blacklisted trackers in the cluster
-		// at any time. This is maintained to avoid iteration over
+		// This count gives the number of blacklisted trackers in the cluster 
+		// at any time. This is maintained to avoid iteration over 
 		// the potentiallyFaultyTrackers to get blacklisted trackers. And also
-		// this count doesn't include blacklisted trackers which are lost,
-		// although the fault info is maintained for lost trackers.
+		// this count doesn't include blacklisted trackers which are lost, 
+		// although the fault info is maintained for lost trackers.  
 		private volatile int numBlacklistedTrackers = 0;
 		private volatile int numGraylistedTrackers = 0;
 
@@ -1178,8 +1237,7 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 				for (FaultInfo f : potentiallyFaultyTrackers.values()) {
 					sum += f.getFaultCount(timeStamp);
 				}
-				double avg = (double) sum / clusterSize; // avg num faults per
-															// node
+				double avg = (double) sum / clusterSize; // avg num faults per node
 				// graylisted trackers are already included in clusterSize:
 				long totalCluster = clusterSize + numBlacklistedTrackers;
 				if ((faultCount - avg) > (AVERAGE_BLACKLIST_THRESHOLD * avg)
@@ -1270,8 +1328,7 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 		void checkTrackerFaultTimeout(String hostName, long now) {
 			synchronized (potentiallyFaultyTrackers) {
 				FaultInfo fi = potentiallyFaultyTrackers.get(hostName);
-				// getFaultCount() auto-rotates the buckets, clearing out the
-				// oldest
+				// getFaultCount() auto-rotates the buckets, clearing out the oldest
 				// as needed, before summing the faults:
 				if (fi != null && fi.getFaultCount(now) < TRACKER_FAULT_THRESHOLD) {
 					unBlacklistTracker(hostName, ReasonForBlackListing.EXCEEDING_FAILURES, true, now);
@@ -1297,10 +1354,8 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 							addHostCapacity(hostName);
 						}
 						fi.unBlacklist(gray);
-						// We have unblack/graylisted tracker, so tracker should
-						// definitely
-						// be healthy. Check fault count; if zero, don't keep it
-						// in memory.
+						// We have unblack/graylisted tracker, so tracker should definitely
+						// be healthy. Check fault count; if zero, don't keep it in memory.
 						if (fi.getFaultCount(timeStamp) == 0) {
 							potentiallyFaultyTrackers.remove(hostName);
 						}
@@ -1334,8 +1389,7 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 			synchronized (potentiallyFaultyTrackers) {
 				FaultInfo fi = potentiallyFaultyTrackers.remove(hostName);
 				if (fi != null) {
-					// a tracker can be both blacklisted and graylisted, so
-					// check both
+					// a tracker can be both blacklisted and graylisted, so check both
 					if (fi.isGraylisted()) {
 						LOG.info("Marking " + hostName + " healthy from graylist");
 						decrGraylistedTrackers(getNumTaskTrackersOnHost(hostName));
@@ -1344,8 +1398,7 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 						LOG.info("Marking " + hostName + " healthy from blacklist");
 						addHostCapacity(hostName);
 					}
-					// no need for fi.unBlacklist() for either one: fi is
-					// already gone
+					// no need for fi.unBlacklist() for either one:  fi is already gone
 				}
 			}
 		}
@@ -1369,7 +1422,7 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 		}
 
 		// This is called when a tracker is restarted or when the health-check
-		// script reports it healthy. (Not called for graylisting.)
+		// script reports it healthy.  (Not called for graylisting.)
 		private void addHostCapacity(String hostName) {
 			synchronized (taskTrackers) {
 				int numTrackersOnHost = 0;
@@ -1441,14 +1494,10 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 		// Assumes JobTracker is locked on the entry.
 		void setNodeHealthStatus(String hostName, boolean isHealthy, String reason, long timeStamp) {
 			FaultInfo fi = null;
-			// If TaskTracker node is not healthy, get or create a fault info
-			// object
-			// and blacklist it. (This path to blacklisting ultimately comes
-			// from
-			// the health-check script called in NodeHealthCheckerService; see
-			// JIRA
-			// MAPREDUCE-211 for details. We never use graylisting for this
-			// path.)
+			// If TaskTracker node is not healthy, get or create a fault info object
+			// and blacklist it.  (This path to blacklisting ultimately comes from
+			// the health-check script called in NodeHealthCheckerService; see JIRA
+			// MAPREDUCE-211 for details.  We never use graylisting for this path.)
 			if (!isHealthy) {
 				fi = getFaultInfo(hostName, true);
 				synchronized (potentiallyFaultyTrackers) {
@@ -1504,9 +1553,9 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 		return numTrackers;
 	}
 
-	// /////////////////////////////////////////////////////
+	///////////////////////////////////////////////////////
 	// Used to recover the jobs upon restart
-	// /////////////////////////////////////////////////////
+	///////////////////////////////////////////////////////
 	class RecoveryManager {
 		Set<JobID> jobsToRecover; // set of jobs to be recovered
 
@@ -1597,14 +1646,13 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 			// Change the job priority
 			String jobpriority = job.get(Keys.JOB_PRIORITY);
 			JobPriority priority = JobPriority.valueOf(jobpriority);
-			// It's important to update this via the jobtracker's api as it will
+			// It's important to update this via the jobtracker's api as it will 
 			// take care of updating the event listeners too
 
 			try {
 				setJobPriority(jip.getJobID(), priority);
 			} catch (IOException e) {
-				// This will not happen. JobTracker can set jobPriority of any
-				// job
+				// This will not happen. JobTracker can set jobPriority of any job
 				// as mrOwner has the needed permissions.
 				LOG.warn("Unexpected. JobTracker could not do SetJobPriority on " + jip.getJobID() + ". " + e);
 			}
@@ -1654,7 +1702,7 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 			String type = attempt.get(Keys.TASK_TYPE);
 			TaskInProgress tip = job.getTaskInProgress(id);
 
-			// I. Get the required info
+			//    I. Get the required info
 			TaskStatus taskStatus = null;
 			String trackerName = attempt.get(Keys.TRACKER_NAME);
 			String trackerHostName = JobInProgress.convertTrackerNameToHostName(trackerName);
@@ -1694,26 +1742,24 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 						TaskTracker taskTracker = getTaskTracker(trackerName);
 						boolean isTrackerRegistered = (taskTracker != null);
 						if (!isTrackerRegistered) {
-							markTracker(trackerName); // add the tracker to
-														// recovery-manager
+							markTracker(trackerName); // add the tracker to recovery-manager
 							taskTracker = new TaskTracker(trackerName);
 							taskTracker.setStatus(ttStatus);
 							addNewTracker(taskTracker);
 						}
 
 						// V. Update the tracker status
-						// This will update the meta info of the jobtracker and
-						// also add the
+						// This will update the meta info of the jobtracker and also add the
 						// tracker status if missing i.e register it
 						updateTaskTrackerStatus(trackerName, ttStatus);
 					}
 				}
-				// Register the attempt with job and tip, under JobTracker lock.
+				// Register the attempt with job and tip, under JobTracker lock. 
 				// Since, as of today they are atomic through heartbeat.
 				// VI. Register the attempt
-				// a) In the job
+				//   a) In the job
 				job.addRunningTaskToTIP(tip, attemptId, ttStatus, false);
-				// b) In the tip
+				//   b) In the tip
 				tip.updateStatus(taskStatus);
 			}
 
@@ -1752,7 +1798,7 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 			// Add the counters
 			String counterString = attempt.get(Keys.COUNTERS);
 			Counters counter = null;
-			// TODO Check if an exception should be thrown
+			//TODO Check if an exception should be thrown
 			try {
 				counter = Counters.fromEscapedCompactString(counterString);
 			} catch (ParseException pe) {
@@ -1836,13 +1882,10 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 			if (fs.exists(restartFile)) {
 				fs.delete(tmpRestartFile, false); // delete the tmp file
 			} else if (fs.exists(tmpRestartFile)) {
-				// if .rec exists then delete the main file and rename the .rec
-				// to main
-				fs.rename(tmpRestartFile, restartFile); // rename .rec to main
-														// file
+				// if .rec exists then delete the main file and rename the .rec to main
+				fs.rename(tmpRestartFile, restartFile); // rename .rec to main file
 			} else {
-				// For the very first time the jobtracker will create a
-				// jobtracker.info
+				// For the very first time the jobtracker will create a jobtracker.info
 				// file.
 				// enable recovery if this is a restart
 				shouldRecover = true;
@@ -1880,9 +1923,8 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 			}
 
 			// Write back the new restart count and rename the old info file
-			// TODO This is similar to jobhistory recovery, maybe this common
-			// code
-			// can be factored out.
+			//TODO This is similar to jobhistory recovery, maybe this common code
+			//      can be factored out.
 
 			// write to the tmp file
 			FSDataOutputStream out = FileSystem.create(fs, tmpRestartFile, filePerm);
@@ -1961,17 +2003,17 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 				.getConstructor(new Class<?>[] { JobTracker.class, JobConf.class });
 			tmp = c.newInstance(this, conf);
 		} catch (Exception e) {
-			// Reflection can throw lots of exceptions -- handle them all by
-			// falling back on the default.
+			//Reflection can throw lots of exceptions -- handle them all by
+			//falling back on the default.
 			LOG.error("failed to initialize job tracker metrics", e);
 			tmp = JobTrackerInstrumentation.create(this, conf);
 		}
 		myInstrumentation = tmp;
 	}
 
-	// ///////////////////////////////////////////////////////////////
+	/////////////////////////////////////////////////////////////////
 	// The real JobTracker
-	// //////////////////////////////////////////////////////////////
+	////////////////////////////////////////////////////////////////
 	int port;
 	String localMachine;
 	private String trackerIdentifier;
@@ -1989,26 +2031,20 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 	//
 	// Properties to maintain while running Jobs and Tasks:
 	//
-	// 1. Each Task is always contained in a single Job. A Job succeeds when all
-	// its
-	// Tasks are complete.
+	// 1.  Each Task is always contained in a single Job.  A Job succeeds when all its 
+	//     Tasks are complete.
 	//
-	// 2. Every running or successful Task is assigned to a Tracker. Idle Tasks
-	// are not.
+	// 2.  Every running or successful Task is assigned to a Tracker.  Idle Tasks are not.
 	//
-	// 3. When a Tracker fails, all of its assigned Tasks are marked as
-	// failures.
+	// 3.  When a Tracker fails, all of its assigned Tasks are marked as failures.
 	//
-	// 4. A Task might need to be reexecuted if it (or the machine it's hosted
-	// on) fails
-	// before the Job is 100% complete. Sometimes an upstream Task can fail
-	// without
-	// reexecution if all downstream Tasks that require its output have already
-	// obtained
-	// the necessary files.
+	// 4.  A Task might need to be reexecuted if it (or the machine it's hosted on) fails
+	//     before the Job is 100% complete.  Sometimes an upstream Task can fail without
+	//     reexecution if all downstream Tasks that require its output have already obtained
+	//     the necessary files.
 	//
 
-	// All the known jobs. (jobid->JobInProgress)
+	// All the known jobs.  (jobid->JobInProgress)
 	Map<JobID, JobInProgress> jobs = Collections.synchronizedMap(new TreeMap<JobID, JobInProgress>());
 
 	// (user -> list of JobInProgress)
@@ -2027,7 +2063,7 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 	Map<String, Set<TaskTracker>> hostnameToTaskTracker = Collections
 		.synchronizedMap(new TreeMap<String, Set<TaskTracker>>());
 
-	// (taskid --> trackerID)
+	// (taskid --> trackerID) 
 	TreeMap<TaskAttemptID, String> taskidToTrackerMap = new TreeMap<TaskAttemptID, String>();
 
 	// (trackerID->TreeSet of taskids running at that tracker)
@@ -2102,37 +2138,13 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 
 	Server interTrackerServer;
 
-	// Some jobs are stored in a local system directory. We can delete
+	// Some jobs are stored in a local system directory.  We can delete
 	// the files when we're done with the job.
 	static final String SUBDIR = "jobTracker";
 	final LocalFileSystem localFs;
 	FileSystem fs = null;
 	Path systemDir = null;
 	JobConf conf;
-
-	/**
-	 * add wzhuo 初始化环境变量的值 public static int NodeNum = 2; // the node in the
-	 * cluster public static int TotalMicropartition = 0; // the total number of
-	 * the // micropartiton public static int ReduceNum = 8; // the total number
-	 * of reduce public static int DecisionNum = 1; // 分配的次数 public static int
-	 * oncePartitionNum = 8; // the number of the mircop in each // time to
-	 * assign public static double IncreaseRate = 0.1;
-	 * 
-	 * @param conf
-	 */
-	// private void InitializeMypartition(JobConf conf) {
-	// NodeNum = Integer.parseInt(conf.get("NodeNum", ""));
-	// // TotalMicropartition =
-	// Integer.parseInt(conf.get("TotalMicropartition",""));
-	// //// ReduceNum = Integer.parseInt(conf.get("ReduceNum", ""));
-	// //// DecisionNum = Integer.parseInt(conf.get("DecisionNum", ""));
-	// //// OncePartitionNum = Integer.parseInt(conf.get("OncePartitionNum",
-	// ""));
-	// //// IncreaseRate = Double.parseDouble(conf.get("IncreaseRate", ""));
-	// }
-	/**
-	 * add end
-	 */
 
 	private final ACLsManager aclsManager;
 
@@ -2148,7 +2160,6 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 	 */
 	JobTracker(JobConf conf) throws IOException, InterruptedException {
 		this(conf, generateNewIdentifier());
-
 	}
 
 	JobTracker(JobConf conf, QueueManager qm) throws IOException, InterruptedException {
@@ -2176,18 +2187,6 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 			LOG.warn(DFSConfigKeys.DFS_CLIENT_RETRY_POLICY_ENABLED_KEY + " is enabled, disabling it");
 			conf.setBoolean(DFSConfigKeys.DFS_CLIENT_RETRY_POLICY_ENABLED_KEY, false);
 		}
-
-		/**
-		 * add wzhuo begin init partition wzhuo // 初始化自己定义的变量值
-		 */
-		// InitializeMypartition(conf);
-		// LOG.info("NodeNum "+ NodeNum +" "+ TotalMicropartition+" "
-		// + " "+ReduceNum+" "+DecisionNum+" "+OncePartitionNum+" "+
-		// IncreaseRate);
-		// /**
-		// * addend
-		// */
-
 	}
 
 	@InterfaceAudience.Private
@@ -2239,8 +2238,7 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 		while (!Thread.currentThread().isInterrupted()) {
 			try {
 				// if we haven't contacted the namenode go ahead and do it
-				// clean up the system dir, which will only work if hdfs is out
-				// of
+				// clean up the system dir, which will only work if hdfs is out of 
 				// safe mode
 				if (systemDir == null) {
 					systemDir = new Path(getSystemDir());
@@ -2257,11 +2255,10 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 						fs.setPermission(systemDir, new FsPermission(SYSTEM_DIR_PERMISSION));
 					}
 				} catch (FileNotFoundException fnf) {
-				} // ignore
+				} //ignore
 					// Make sure that the backup data is preserved
 				FileStatus[] systemDirData = fs.listStatus(this.systemDir);
-				// Check if the history is enabled .. as we cant have
-				// persistence with
+				// Check if the history is enabled .. as we cant have persistence with 
 				// history disabled
 				if (conf.getBoolean("mapred.jobtracker.restart.recover", false) && systemDirData != null) {
 					for (FileStatus status : systemDirData) {
@@ -2275,8 +2272,7 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 					// Check if there are jobs to be recovered
 					hasRestarted = recoveryManager.shouldRecover();
 					if (hasRestarted) {
-						break; // if there is something to recover else clean
-								// the sys dir
+						break; // if there is something to recover else clean the sys dir
 					}
 				}
 				LOG.info("Cleaning up the system directory");
@@ -2333,7 +2329,7 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 			LOG.info("Job History Server web address: " + JobHistoryServer.getAddress(conf));
 		}
 
-		// initializes the job status store
+		//initializes the job status store
 		completedJobStatusStore = new CompletedJobStatusStore(conf, aclsManager);
 
 		// Setup HDFS monitoring
@@ -2387,7 +2383,7 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 		TRACKER_FAULT_BUCKET_WIDTH = // 15 minutes
 		conf.getInt("mapred.jobtracker.blacklist.fault-bucket-width", 15);
 		TRACKER_FAULT_THRESHOLD = conf.getInt("mapred.max.tracker.blacklists", 4);
-		// future: rename to "mapred.jobtracker.blacklist.fault-threshold" for
+		// future:  rename to "mapred.jobtracker.blacklist.fault-threshold" for
 		// namespace consistency
 
 		if (TRACKER_FAULT_BUCKET_WIDTH > TRACKER_FAULT_TIMEOUT_WINDOW) {
@@ -2395,8 +2391,7 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 		}
 		TRACKER_FAULT_BUCKET_WIDTH_MSECS = (long) TRACKER_FAULT_BUCKET_WIDTH * 60 * 1000;
 
-		// ideally, TRACKER_FAULT_TIMEOUT_WINDOW should be an integral multiple
-		// of
+		// ideally, TRACKER_FAULT_TIMEOUT_WINDOW should be an integral multiple of
 		// TRACKER_FAULT_BUCKET_WIDTH, but round up just in case:
 		NUM_FAULT_BUCKETS = (TRACKER_FAULT_TIMEOUT_WINDOW + TRACKER_FAULT_BUCKET_WIDTH - 1)
 			/ TRACKER_FAULT_BUCKET_WIDTH;
@@ -2414,11 +2409,10 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 
 		// This configuration is there solely for tuning purposes and
 		// once this feature has been tested in real clusters and an appropriate
-		// value for the threshold has been found, this config might be taken
-		// out.
+		// value for the threshold has been found, this config might be taken out.
 		AVERAGE_BLACKLIST_THRESHOLD = conf.getFloat("mapred.cluster.average.blacklist.threshold", 0.5f);
 
-		// This is a directory of temporary submission files. We delete it
+		// This is a directory of temporary submission files.  We delete it
 		// on startup, and can delete any files that we're done with
 		this.conf = conf;
 		JobConf jobConf = new JobConf(conf);
@@ -2474,7 +2468,7 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 
 		createInstrumentation();
 
-		// The rpc/web-server ports can be ephemeral ports...
+		// The rpc/web-server ports can be ephemeral ports... 
 		// ... ensure we have the correct info
 		this.port = interTrackerServer.getListenerAddress().getPort();
 		this.conf.set("mapred.job.tracker", (this.localMachine + ":" + this.port));
@@ -2576,7 +2570,7 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 	 * Run forever
 	 */
 	public void offerService() throws InterruptedException, IOException {
-		// start the inter-tracker server
+		// start the inter-tracker server 
 		this.interTrackerServer.start();
 
 		// Initialize the JobTracker FileSystem within safemode
@@ -2587,8 +2581,7 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 		// Initialize JobTracker
 		initialize();
 
-		// Prepare for recovery. This is done irrespective of the status of
-		// restart
+		// Prepare for recovery. This is done irrespective of the status of restart
 		// flag.
 		while (true) {
 			try {
@@ -2604,13 +2597,13 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 
 		taskScheduler.start();
 
-		// Start the recovery after starting the scheduler
+		//  Start the recovery after starting the scheduler
 		try {
 			recoveryManager.recover();
 		} catch (Throwable t) {
 			LOG.warn("Recovery manager crashed! Ignoring.", t);
 		}
-		// refresh the node list as the recovery manager might have added
+		// refresh the node list as the recovery manager might have added 
 		// disallowed trackers
 		refreshHosts();
 
@@ -2700,10 +2693,10 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 		return;
 	}
 
-	// /////////////////////////////////////////////////////
+	///////////////////////////////////////////////////////
 	// Maintain lookup tables; called by JobInProgress
 	// and TaskInProgress
-	// /////////////////////////////////////////////////////
+	///////////////////////////////////////////////////////
 	void createTaskEntry(TaskAttemptID taskid, String taskTracker, TaskInProgress tip) {
 		LOG.info("Adding task (" + tip.getAttemptType(taskid) + ") " + "'" + taskid + "' to tip "
 			+ tip.getTIPId() + ", for tracker '" + taskTracker + "'");
@@ -2915,10 +2908,10 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 		}
 	}
 
-	// /////////////////////////////////////////////////////
+	///////////////////////////////////////////////////////
 	// Accessors for objects that want info on jobs, tasks,
 	// trackers, etc.
-	// /////////////////////////////////////////////////////
+	///////////////////////////////////////////////////////
 	public int getTotalSubmissions() {
 		return totalSubmissions;
 	}
@@ -3016,8 +3009,8 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 	 * 
 	 * @return {@link Collection} of active {@link TaskTrackerStatus}
 	 */
-	// This method is synchronized to make sure that the locking order
-	// "taskTrackers lock followed by faultyTrackers.potentiallyFaultyTrackers
+	// This method is synchronized to make sure that the locking order 
+	// "taskTrackers lock followed by faultyTrackers.potentiallyFaultyTrackers 
 	// lock" is under JobTracker lock to avoid deadlocks.
 	synchronized public Collection<TaskTrackerStatus> activeTaskTrackers() {
 		Collection<TaskTrackerStatus> activeTrackers = new ArrayList<TaskTrackerStatus>();
@@ -3200,10 +3193,10 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 		TaskTrackerStatus status = taskTracker.getStatus();
 		trackerExpiryQueue.add(status);
 
-		// Register the tracker if its not registered
+		//  Register the tracker if its not registered
 		String hostname = status.getHost();
 		if (getNode(status.getTrackerName()) == null) {
-			// Making the network location resolution inline ..
+			// Making the network location resolution inline .. 
 			resolveAndAddToTopology(hostname);
 		}
 
@@ -3309,9 +3302,9 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 		return queueManager;
 	}
 
-	// //////////////////////////////////////////////////
+	////////////////////////////////////////////////////
 	// InterTrackerProtocol
-	// //////////////////////////////////////////////////
+	////////////////////////////////////////////////////
 
 	// Just returns the VersionInfo version (unlike MXBean#getVersion)
 	public String getVIVersion() throws IOException {
@@ -3339,21 +3332,22 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 		}
 
 		/*********************
-		 * add balance begin
+		 * add static balance begin
+		 * 
+		 * @author wzhuo
+		 * @功能 接受来自task的信息对采样信息进行汇总 更新GlobalSampleTabs
+		 * 
+		 *     InfoFromTaskTracker中的信息是单个节点上所有MapTask的采样信息汇总
+		 * 
 		 ********************/
-		/**
-		 * 接受来自task的信息对采样信息进行汇总 pocess the infomation from taskTrackers.
-		 **/
-		if (status.InfoFromTaskTracker.equals("i am null") == false) {
-			if (HostName_posion.containsKey(status.getHost()) == false) {
-				HostName_posion.put(status.getHost(), HostNum);
-				HostNum++;
+		if (status.InfoFromTaskTracker.equals("These is null") == false) {
+			if (TaskNameList.equals(status.getTrackerName()) == false) {
+				TaskNameList.add(status.getTrackerName());
 			}
-			this.UpdatepValueNum(status.InfoFromTaskTracker, HostName_posion.get(status.getHost()));
-			LOG.info(HostName_posion.get(status.host));
+			this.UpdateLocalSampleTabs(status.InfoFromTaskTracker, status.getTrackerName());
 		}
 		/*********************
-		 * add balance begin
+		 * add static balance end
 		 ********************/
 
 		// Make sure heartbeat is from a tasktracker allowed by the jobtracker.
@@ -3376,15 +3370,14 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 		if (initialContact != true) {
 			// If this isn't the 'initial contact' from the tasktracker,
 			// there is something seriously wrong if the JobTracker has
-			// no record of the 'previous heartbeat'; if so, ask the
+			// no record of the 'previous heartbeat'; if so, ask the 
 			// tasktracker to re-initialize itself.
 			if (prevHeartbeatResponse == null) {
-				// This is the first heartbeat from the old tracker to the newly
+				// This is the first heartbeat from the old tracker to the newly 
 				// started JobTracker
 				if (hasRestarted()) {
 					addRestartInfo = true;
-					// inform the recovery manager about this tracker joining
-					// back
+					// inform the recovery manager about this tracker joining back
 					recoveryManager.unMarkTracker(trackerName);
 				} else {
 					// Jobtracker might have restarted but no recovery is needed
@@ -3394,14 +3387,14 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 					return new HeartbeatResponse(responseId,
 						new TaskTrackerAction[] { new ReinitTrackerAction() });
 				}
+
 			} else {
-				// It is completely safe to not process a 'duplicate' heartbeat
-				// from a
-				// {@link TaskTracker} since it resends the heartbeat when rpcs
-				// are
+
+				// It is completely safe to not process a 'duplicate' heartbeat from a 
+				// {@link TaskTracker} since it resends the heartbeat when rpcs are 
 				// lost see {@link TaskTracker.transmitHeartbeat()};
-				// acknowledge it by re-sending the previous response to let the
-				// {@link TaskTracker} go forward.
+				// acknowledge it by re-sending the previous response to let the 
+				// {@link TaskTracker} go forward. 
 				if (prevHeartbeatResponse.getResponseId() != responseId) {
 					LOG.info("Ignoring 'duplicate' heartbeat from '" + trackerName
 						+ "'; resending the previous 'lost' response");
@@ -3410,7 +3403,7 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 			}
 		}
 
-		// Process this heartbeat
+		// Process this heartbeat 
 		short newResponseId = (short) (responseId + 1);
 		status.setLastSeen(now);
 		if (!processHeartbeat(status, initialContact, now)) {
@@ -3446,6 +3439,84 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 			}
 		}
 
+		/*********************
+		 * add static balance begin
+		 * 
+		 * @author wzhuo
+		 * @功能 (1)定义决策时机和reduce的初始化 (2)决策方案的制订
+		 * 
+		 ********************/
+		//获取该heartbeat中所包含的所有tasks的信息
+		Set<TaskAttemptID> nodeTasks = trackerToTaskMap.get(trackerName);
+		// 每次都对心跳信息进行监控，保证初始化工作和运行进度的获取
+		if (nodeTasks != null) {
+			//(1)获取该heartbeat中该节点上包含的所有tasks的信息
+			for (TaskAttemptID onetaskId : nodeTasks) {
+				JobStatus thisjobstatus = getJobStatus(onetaskId.getJobID());
+				JobProgressingTime = thisjobstatus.mapProgress();
+
+				//如果是maptask，进行判断
+				if (onetaskId.isMap()) {
+					continue;
+				}
+
+				//如果是reducetask，将初始化得到的Reduce代号放到已分配的Map中
+				if (ReduceCoMicPs.containsKey(onetaskId) == false) {
+					//初始化未分配分区链表
+					if (UnAssiMicP.isEmpty()) {
+						Iterator globaliter = LocalSampleTabs.entrySet().iterator();
+						while (globaliter.hasNext()) {
+							Map.Entry nodeent = (Map.Entry) globaliter.next();
+							HashMap<Integer, Long> globaltent = (HashMap<Integer, Long>) nodeent.getValue();
+
+							//初始化GlobalTables
+							for (int i = 0; i < globaltent.size(); i++) {
+								UnAssiMicP.put(i, (long) 0);
+								//AssiMicP.add(i);
+							}
+							break; //只需要对第一个Task进行赋值
+						}
+					}
+					//初始化未分配链表
+					//ReduceFinished.put(onetaskId, "false");
+					LinkedList<Integer> micrlist = new LinkedList<Integer>();
+					micrlist.add(taskidToTIPMap.get(onetaskId).getIdWithinJob());
+					ReduceCoMicPs.put(onetaskId, micrlist);//初始化的分区增加到已分配列表
+					UnAssiMicP.remove(taskidToTIPMap.get(onetaskId).getIdWithinJob());
+					AssiMicP.add(taskidToTIPMap.get(onetaskId).getIdWithinJob());
+					EachAssPlan.put(onetaskId, micrlist);
+					ReduceFinished.put(onetaskId, "false");
+					//初始化reduce的负载矩阵
+					ReduceLoad.put(onetaskId, (long) 0);
+				}
+			}// for
+		} //end if
+
+		//如果该maptask还没有被分配，并且运行到该task的80%
+		double lastDECISIONTIME = 0.0;
+
+		if ((UnAssiMicP.isEmpty() == false) && (JobInProgress.finishedMapTasks >= 0.5)
+			&& ((JobProgressingTime - lastDECISIONTIME) >= 0.1 || JobInProgress.finishedMapTasks== JobInProgress.numMapTasks) 
+			&& (EachAssPlan.isEmpty())) {
+			if (DecisionModel()) {
+				lastDECISIONTIME = JobProgressingTime;
+				//LOG.info("lastDECISIONTIME%%{" + lastDECISIONTIME + "}");
+			}
+		}
+
+		if (ReduceFinished.containsValue("false") || (EachAssPlan.isEmpty() == false)) {
+			List<TaskTrackerAction> addNewPartitionList = addMicPartition(trackerName);
+			if (addNewPartitionList != null) {
+				for (TaskTrackerAction ac : addNewPartitionList) {
+					LOG.info("ac@@" + ac.toString());
+				}
+				actions.addAll(addNewPartitionList);
+			}
+		}
+		/*********************
+		 * add static balance end
+		 ********************/
+
 		// Check for tasks to be killed
 		List<TaskTrackerAction> killTasksList = getTasksToKill(trackerName);
 		if (killTasksList != null) {
@@ -3463,81 +3534,6 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 		if (commitTasksList != null) {
 			actions.addAll(commitTasksList);
 		}
-
-		/*********************
-		 * add balance begin
-		 ********************/
-		/**
-		 * 更新数据 Map<Integer,String> ReduceTaskIds= new
-		 * HashMap<Integer,String>(); Map<String, Set<Integer>>
-		 * AssedTaskHaveMicro= new HashMap<String,Set<Integer>>();
-		 */
-		if (ReduceTaskIds.size() < ReduceNum) {
-			Set<TaskAttemptID> taskIds = trackerToTaskMap.get(trackerName);
-			if (taskIds != null) {
-				for (TaskAttemptID taskId : taskIds) {
-					if (taskId.isMap()) {
-						continue;
-					}
-					if (AssedTaskHaveMicro.containsKey(taskId) == false) {
-						LinkedList<Integer> list = new LinkedList<Integer>();
-						list.add(taskidToTIPMap.get(taskId).getIdWithinJob());
-						// LOG.info(taskId.getId());
-						AssedTaskHaveMicro.put(taskId, list);
-						ReduceTaskIds.put(taskidToTIPMap.get(taskId).getIdWithinJob(), taskId);
-						// LOG.info("AssedParToTaskinit is:" +
-						// ReduceTaskIds.size());
-					}
-				}// for
-					// LOG.info("AssedParToTaskinit is:"+ReduceTaskIds.size());
-			}// if
-		}
-
-		// 判断是否到达执行决策的时机,如果达到了决策的时机那么便进行决策。
-		/**
-		 * public int DecisionNum=2;//初始化分配的次数 public int
-		 * DecisionedNum=0;//已经分配的次数 public LinkedList<Integer>
-		 * SchedParEachRound = new LinkedList<Integer>();
-		 */
-
-		if (ReduceTaskIds.size() == ReduceNum) {
-			// init SchedParEachRound
-			if (DecisionedNum == 0) {
-				for (int i = 0; i < ReduceNum; i++) {
-					SchedParEachRound.add(i);
-					CandidatePart.add(i);
-				}
-			}
-
-			// DecisionModel()
-			double lastDECISIONTIME = 0.0;
-
-			if ((DecisionedNum < DecisionNum)) {
-
-				if (((DecisionedNum == 0) || ((DECISIONTIME - lastDECISIONTIME >= IncreaseRate) && (ONECDECISIONFINISHED == 0)))
-					&& (LOCKDECISIONMODE) && (JobInProgress.finishedMapTasks >= 1)) {
-
-					if (DecisionModel()) {
-						lastDECISIONTIME = DECISIONTIME;
-
-						DecisionedNum++;
-						LOCKDECISIONMODE = true;
-					}
-				}
-			}
-
-			// add the rest partition to reduce
-			List<TaskTrackerAction> addNewPartitionList = getAddPartition(trackerName);
-			if (addNewPartitionList != null) {
-				for (TaskTrackerAction ac : addNewPartitionList) {
-					LOG.info(ac.toString());
-				}
-				actions.addAll(addNewPartitionList);
-			}
-		}
-		/*********************
-		 * add balance end
-		 ********************/
 
 		// calculate next heartbeat interval and put in heartbeat response
 		int nextInterval = getNextHeartbeatInterval();
@@ -3597,48 +3593,6 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 	private boolean acceptTaskTracker(TaskTrackerStatus status) {
 		return (inHostsList(status) && !inExcludedHostsList(status));
 	}
-
-	/*********************
-	 * add balance begin
-	 ********************/
-	/**
-	 * Update UpdatepValueNum,UpdatepValueNum is a long[10][10]; use this
-	 * function in heartbeat
-	 */
-	public void UpdatepValueNum(String mes, int hostid) {
-		/**
-		 * example info:{3=0, 2=0, 1=0, 0=0}
-		 */
-		// LOG.info("mes$$$"+mes);
-		mes = mes.replace("{", "");
-		mes = mes.replaceAll(" ", "");
-		mes = mes.replace("}", "");
-
-		HashMap<Integer, Long> pidnum = new HashMap<Integer, Long>();
-		/**
-		 * example info:3=0,2=0,1=0,0=0
-		 */
-		if (mes.length() > 1) {
-			String[] s = mes.split(",");
-			if (s.length > 0) {
-				for (int i = 0; i < s.length; i++) {
-					String[] ss = s[i].split("=");
-					int parid = Integer.valueOf(ss[0]);
-					Long pnum = Long.valueOf(ss[1]);
-					pValue_num[hostid][parid] = pnum;
-					// LOG.info("mes!!!="+mes+"hostid@@@="+hostid+"parid###"+parid+"ptotalnum$$$="+pnum);
-					// finished
-					pidnum.put(parid, pnum);
-				}
-			}
-		}
-		pvalue_num.put(hostid, pidnum);
-		// LOG.info("#######pval="+pvalue_num); finished
-	}
-
-	/*********************
-	 * add balance end
-	 ********************/
 
 	/**
 	 * Update the last recorded status for the given task tracker. It assumes
@@ -3743,7 +3697,6 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 						}
 					}
 				}
-
 				LOG.debug(trackerName + ": Status -" + " running(m) = " + runningMaps + " unassigned(m) = "
 					+ unassignedMaps + " commit_pending(m) = " + commitPendingMaps + " misc(m) = " + miscMaps
 					+ " running(r) = " + runningReduces + " unassigned(r) = " + unassignedReduces
@@ -3807,14 +3760,13 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 				boolean seenBefore = updateTaskTrackerStatus(trackerName, trackerStatus);
 				TaskTracker taskTracker = getTaskTracker(trackerName);
 				if (initialContact) {
-					// If it's first contact, then clear out
+					// If it's first contact, then clear out 
 					// any state hanging around
 					if (seenBefore) {
 						lostTaskTracker(taskTracker);
 					}
 				} else {
-					// If not first contact, there should be some record of the
-					// tracker
+					// If not first contact, there should be some record of the tracker
 					if (!seenBefore) {
 						LOG.warn("Status from unknown Tracker : " + trackerName);
 						updateTaskTrackerStatus(trackerName, null);
@@ -3823,15 +3775,12 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 				}
 
 				if (initialContact) {
-					// if this is lost tracker that came back now, and if it's
-					// blacklisted
-					// increment the count of blacklisted trackers in the
-					// cluster
+					// if this is lost tracker that came back now, and if it's blacklisted
+					// increment the count of blacklisted trackers in the cluster
 					if (isBlacklisted(trackerName)) {
 						faultyTrackers.incrBlacklistedTrackers(1);
 					}
-					// This could now throw an UnknownHostException but only if
-					// the
+					// This could now throw an UnknownHostException but only if the
 					// TaskTracker status itself has an invalid name
 					addNewTracker(taskTracker);
 				}
@@ -3843,112 +3792,6 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 
 		return true;
 	}
-
-	/**
-	 * 只应该由reduce task调用 这里目前只靠率单任务情况下的操作
-	 * 
-	 * @param trackerName
-	 * @return
-	 */
-
-	/*********************
-	 * add balance begin
-	 ********************/
-	/**
-	 * public Map<Integer,TaskAttemptID> ReduceTaskIds= new
-	 * HashMap<Integer,TaskAttemptID>();//存储已经分配的
-	 * <P，task>
-	 * 对 public Map<TaskAttemptID, Set<Integer>> AssedTaskHaveMicro = new
-	 * HashMap<TaskAttemptID,Set<Integer>>();//存储已经分配的
-	 * <P，R>
-	 * 对 public Map<Integer,Integer> partitionToreduceID = new
-	 * HashMap<Integer,Integer>();//存储尚未分配的
-	 * <P，R>
-	 * 对
-	 */
-	// // add by wzhuo
-	private LinkedList<Integer> getNextPartition(TaskAttemptID taskId) {
-		LinkedList<Integer> res = new LinkedList<Integer>();
-		// LOG.info("ReduceTaskIds is #####" + ReduceTaskIds);
-		if (ReduceTaskIds.isEmpty() == false) {
-			for (int i = 0; i < ReduceNum; i++) {
-				if (ReduceTaskIds.get(i) == taskId) {
-					if (NotAssedParHaveMirco.get(i).isEmpty() == false) {
-
-						LinkedList<Integer> temp = AssedTaskHaveMicro.get(taskId);
-
-						LinkedList<Integer> list = NotAssedParHaveMirco.get(i);
-						for (int j = 0; j < NotAssedParHaveMirco.get(i).size(); j++) {
-							temp.add(NotAssedParHaveMirco.get(i).get(j));
-							SchedParEachRound.add(NotAssedParHaveMirco.get(i).get(j));
-							// NotAssedParHaveMirco.get(i).removeFirst();
-						}
-
-						// recorver the same big partition
-						AssedTaskHaveMicro.put(taskId, temp);
-
-						res = list;
-						return res;
-					}
-					return res;
-				}
-				continue;
-			}
-		}
-		return res;
-	}
-
-	private List<TaskTrackerAction> getAddPartition(String trackerName) {
-		// f(maxPartition < 0)
-		// maxPartition = conf.getNumReduceTasks()-1;
-		List<TaskTrackerAction> addPartitionList = new ArrayList<TaskTrackerAction>();
-		Set<TaskAttemptID> taskIds = trackerToTaskMap.get(trackerName);
-		// JobStatus thisjobstatus = getJobstatus(taskId.getJobID());
-
-		if (taskIds == null)
-			return null;
-		for (TaskAttemptID taskId : taskIds) {
-			// LOG.info(trackerName+"上面运行的taskid是"+taskId);
-			if (taskId.isMap()) {
-				// catch the mapprogress to ensure the decisontime add by wzhuo
-				JobStatus thisjobstatus = getJobStatus(taskId.getJobID());
-				DECISIONTIME = thisjobstatus.mapProgress();
-				continue;
-			}
-
-			// boolean finished = Restpartitionnum <= 0;
-			boolean finished = (SchedParEachRound.size() == TotalMicropartition);
-
-			// int toArrPart = getNextPartition(taskId);
-			if (!finished) {
-				// LockAddpartition = false;
-				LinkedList<Integer> toArrPart = getNextPartition(taskId);
-				// CandidatePart
-				if (toArrPart.isEmpty()) {
-					continue;
-				} else {
-					addPartitionList.add(new AddPartitionAction(taskId, toArrPart, finished));
-					// list:NotAssedParHaveMirco
-					for (int i = 0; i < ReduceNum; i++) {
-						if (ReduceTaskIds.get(i) == taskId) {
-							while (NotAssedParHaveMirco.get(i).size() > 0) {
-								NotAssedParHaveMirco.get(i).removeFirst();
-								ONECDECISIONFINISHED--;
-							}
-						}
-					}
-				}
-				return addPartitionList;
-			} else {
-				addPartitionList.add(new AddPartitionAction(taskId, new int[0], finished));
-			}
-		}
-		return addPartitionList;
-	}
-
-	/*********************
-	 * add balance end
-	 ********************/
 
 	/**
 	 * A tracker wants to know if any of its Tasks have been closed (because the
@@ -3965,9 +3808,8 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 					continue;
 				}
 				if (tip.shouldClose(killTaskId)) {
-					//
-					// This is how the JobTracker ends a task at the
-					// TaskTracker.
+					// 
+					// This is how the JobTracker ends a task at the TaskTracker.
 					// It may be successfully completed, or may be killed in
 					// mid-execution.
 					//
@@ -4159,9 +4001,9 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 		return jobid.substring(4);
 	}
 
-	// //////////////////////////////////////////////////
+	////////////////////////////////////////////////////
 	// JobSubmissionProtocol
-	// //////////////////////////////////////////////////
+	////////////////////////////////////////////////////
 
 	/**
 	 * Allocates a new JobId string.
@@ -4231,8 +4073,7 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 				throw ioe;
 			}
 
-			// Check the job if it cannot run in the cluster because of invalid
-			// memory
+			// Check the job if it cannot run in the cluster because of invalid memory
 			// requirements.
 			try {
 				checkMemoryRequirements(job);
@@ -4241,8 +4082,7 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 			}
 
 			if (!recovered) {
-				// Store the information in a file so that the job can be
-				// recovered
+				// Store the information in a file so that the job can be recovered
 				// later (if at all)
 				Path jobDir = getSystemDirectoryForJob(jobId);
 				FileSystem.mkdirs(fs, jobDir, new FsPermission(SYSTEM_DIR_PERMISSION));
@@ -4351,8 +4191,7 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 					totalReduceTaskCapacity, state, getExcludedNodes().size());
 			} else {
 				return new ClusterStatus(
-					// active trackers include graylisted but not
-					// blacklisted ones:
+					// active trackers include graylisted but not blacklisted ones:
 					taskTrackers.size() - getBlacklistedTrackerCount(), getBlacklistedTrackerCount(),
 					getGraylistedTrackerCount(), TASKTRACKER_EXPIRY_INTERVAL, totalMaps, totalReduces,
 					totalMapTaskCapacity, totalReduceTaskCapacity, state, getExcludedNodes().size());
@@ -4398,11 +4237,11 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 		job.kill();
 
 		// Inform the listeners if the job is killed
-		// Note :
-		// If the job is killed in the PREP state then the listeners will be
-		// invoked
-		// If the job is killed in the RUNNING state then cleanup tasks will be
-		// launched and the updateTaskStatuses() will take care of it
+		// Note : 
+		//   If the job is killed in the PREP state then the listeners will be 
+		//   invoked
+		//   If the job is killed in the RUNNING state then cleanup tasks will be 
+		//   launched and the updateTaskStatuses() will take care of it
 		JobStatus newStatus = (JobStatus) job.getStatus().clone();
 		if (prevStatus.getRunState() != newStatus.getRunState()
 			&& newStatus.getRunState() == JobStatus.KILLED) {
@@ -4475,7 +4314,7 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 				}
 			}
 		} catch (KillInterruptedException kie) {
-			// If job was killed during initialization, job state will be KILLED
+			//   If job was killed during initialization, job state will be KILLED
 			LOG.error("Job initialization interrupted:\n" + StringUtils.stringifyException(kie));
 			killJob(job);
 		} catch (Throwable t) {
@@ -4522,7 +4361,7 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 	}
 
 	void storeCompletedJob(JobInProgress job) {
-		// persists the job info in DFS
+		//persists the job info in DFS
 		completedJobStatusStore.store(job);
 	}
 
@@ -4868,9 +4707,9 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 		return acl;
 	}
 
-	// /////////////////////////////////////////////////////////////
+	///////////////////////////////////////////////////////////////
 	// JobTracker methods
-	// /////////////////////////////////////////////////////////////
+	///////////////////////////////////////////////////////////////
 	public JobInProgress getJob(JobID jobid) {
 		return jobs.get(jobid);
 	}
@@ -4880,12 +4719,12 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 		return new Path(getSystemDir(), id.toString());
 	}
 
-	// Get the job token file in system directory
+	//Get the job token file in system directory
 	Path getSystemFileForJob(JobID id) {
 		return new Path(getSystemDirectoryForJob(id) + "/" + JOB_INFO_FILE);
 	}
 
-	// Get the job token file in system directory
+	//Get the job token file in system directory
 	Path getTokenFileForJob(JobID id) {
 		return new Path(getSystemDirectoryForJob(id) + "/" + JOB_TOKEN_FILE);
 	}
@@ -4921,9 +4760,9 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 		}
 	}
 
-	// //////////////////////////////////////////////////
+	////////////////////////////////////////////////////
 	// Methods to track all the TaskTrackers
-	// //////////////////////////////////////////////////
+	////////////////////////////////////////////////////
 	/**
 	 * Accept and process a new TaskTracker profile. We might have known about
 	 * the TaskTracker previously, or it might be brand-new. All task-tracker
@@ -4967,8 +4806,7 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 			}
 
 			TaskInProgress tip = taskidToTIPMap.get(taskId);
-			// Check if the tip is known to the jobtracker. In case of a
-			// restarted
+			// Check if the tip is known to the jobtracker. In case of a restarted
 			// jt, some tasks might join in later
 			if (tip != null || hasRestarted()) {
 				if (tip == null) {
@@ -4995,15 +4833,14 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 				LOG.info("Serious problem.  While updating status, cannot find taskid " + report.getTaskID());
 			}
 
-			// Process 'failed fetch' notifications
+			// Process 'failed fetch' notifications 
 			List<TaskAttemptID> failedFetchMaps = report.getFetchFailedMaps();
 			if (failedFetchMaps != null) {
 				for (TaskAttemptID mapTaskId : failedFetchMaps) {
 					TaskInProgress failedFetchMap = taskidToTIPMap.get(mapTaskId);
 
 					if (failedFetchMap != null) {
-						// Gather information about the map which has to be
-						// failed, if need be
+						// Gather information about the map which has to be failed, if need be
 						String failedFetchTrackerName = getAssignedTracker(mapTaskId);
 						if (failedFetchTrackerName == null) {
 							failedFetchTrackerName = "Lost task tracker";
@@ -5047,17 +4884,16 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 				TaskInProgress tip = taskidToTIPMap.get(taskId);
 				JobInProgress job = tip.getJob();
 
-				// Completed reduce tasks never need to be failed, because
+				// Completed reduce tasks never need to be failed, because 
 				// their outputs go to dfs
-				// And completed maps with zero reducers of the job
-				// never need to be failed.
+				// And completed maps with zero reducers of the job 
+				// never need to be failed. 
 				if (!tip.isComplete()
 					|| (tip.isMapTask() && !tip.isJobSetupTask() && job.desiredReduces() != 0)) {
 					// if the job is done, we don't want to change anything
 					if (job.getStatus().getRunState() == JobStatus.RUNNING
 						|| job.getStatus().getRunState() == JobStatus.PREP) {
-						// the state will be KILLED_UNCLEAN, if the task(map or
-						// reduce)
+						// the state will be KILLED_UNCLEAN, if the task(map or reduce) 
 						// was RUNNING on the tracker
 						TaskStatus.State killState = (tip.isRunningTask(taskId) && !tip.isJobSetupTask() && !tip
 							.isJobCleanupTask()) ? TaskStatus.State.KILLED_UNCLEAN : TaskStatus.State.KILLED;
@@ -5067,15 +4903,15 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 						jobsWithFailures.add(job);
 					}
 				} else {
-					// Completed 'reduce' task and completed 'maps' with zero
+					// Completed 'reduce' task and completed 'maps' with zero 
 					// reducers of the job, not failed;
 					// only removed from data-structures.
 					markCompletedTaskAttempt(trackerName, taskId);
 				}
 			}
 
-			// Penalize this tracker for each of the jobs which
-			// had any tasks running on it when it was 'lost'
+			// Penalize this tracker for each of the jobs which   
+			// had any tasks running on it when it was 'lost' 
 			// Also, remove any reserved slots on this tasktracker
 			for (JobInProgress job : jobsWithFailures) {
 				job.addTrackerTaskFailure(trackerName, taskTracker);
@@ -5084,7 +4920,7 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 			// Cleanup
 			taskTracker.cancelAllReservations();
 
-			// Purge 'marked' tasks, needs to be done
+			// Purge 'marked' tasks, needs to be done  
 			// here to prevent hanging references!
 			removeMarkedTasks(trackerName);
 		}
@@ -5113,8 +4949,7 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 	}
 
 	private synchronized void refreshHosts() throws IOException {
-		// Reread the config to get mapred.hosts and mapred.hosts.exclude
-		// filenames.
+		// Reread the config to get mapred.hosts and mapred.hosts.exclude filenames.
 		// Update the file names and refresh internal includes and excludes list
 		LOG.info("Refreshing hosts information");
 		Configuration conf = new Configuration();
@@ -5126,8 +4961,7 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 		for (Map.Entry<String, TaskTracker> eSet : taskTrackers.entrySet()) {
 			String trackerName = eSet.getKey();
 			TaskTrackerStatus status = eSet.getValue().getStatus();
-			// Check if not include i.e not in host list or in hosts list but
-			// excluded
+			// Check if not include i.e not in host list or in hosts list but excluded
 			if (!inHostsList(status) || inExcludedHostsList(status)) {
 				excludeSet.add(status.getHost()); // add to rejected trackers
 			}
@@ -5135,8 +4969,7 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 		decommissionNodes(excludeSet);
 	}
 
-	// Assumes JobTracker, taskTrackers and trackerExpiryQueue is locked on
-	// entry
+	// Assumes JobTracker, taskTrackers and trackerExpiryQueue is locked on entry
 	// Remove a tracker from the system
 	private void removeTracker(TaskTracker tracker) {
 		String trackerName = tracker.getTrackerName();
@@ -5201,9 +5034,9 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 		return JobHistory.JobInfo.getLocalJobFilePath(jobId);
 	}
 
-	// //////////////////////////////////////////////////////////
+	////////////////////////////////////////////////////////////
 	// main()
-	// //////////////////////////////////////////////////////////
+	////////////////////////////////////////////////////////////
 
 	/**
 	 * Start the JobTracker process. This is used only for debugging. As a rule,
@@ -5315,7 +5148,7 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 			limitMaxMemForMapTasks = limitMaxMemForReduceTasks = JobConf.normalizeMemoryConfigValue(conf
 				.getLong(JobConf.UPPER_LIMIT_ON_TASK_VMEM_PROPERTY, JobConf.DISABLED_MEMORY_LIMIT));
 			if (limitMaxMemForMapTasks != JobConf.DISABLED_MEMORY_LIMIT && limitMaxMemForMapTasks >= 0) {
-				limitMaxMemForMapTasks = limitMaxMemForReduceTasks = limitMaxMemForMapTasks / (1024 * 1024); // Converting old values in bytes to MB
+				limitMaxMemForMapTasks = limitMaxMemForReduceTasks = limitMaxMemForMapTasks / (1024 * 1024); //Converting old values in bytes to MB
 			}
 		} else {
 			limitMaxMemForMapTasks = JobConf.normalizeMemoryConfigValue(conf.getLong(
