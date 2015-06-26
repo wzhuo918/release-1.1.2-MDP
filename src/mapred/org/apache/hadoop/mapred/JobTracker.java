@@ -117,7 +117,6 @@ import org.mortbay.util.ajax.JSON;
 /*******************************************************
  * JobTracker is the central location for submitting and tracking MR jobs in a
  * network environment.
- * 
  *******************************************************/
 public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmissionProtocol,
 	TaskTrackerManager, RefreshUserMappingsProtocol, RefreshAuthorizationPolicyProtocol,
@@ -320,9 +319,8 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 		}
 	}
 
-	//public static int LOCKDECISIONMODE = 2; // the lock to the DecisionMode
 	public static double JobProgressingTime = 0.0; // the lock to the DecisionMode
-	public static boolean FINISHEDALL = true;
+	public long TotalSampleTuples = 0;
 
 	//用于表示采样信息所在节点的链表
 	public List<String> TaskNameList = new LinkedList<String>();
@@ -347,16 +345,12 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 	public Map<TaskAttemptID, LinkedList<Integer>> EachAssPlan = new HashMap<TaskAttemptID, LinkedList<Integer>>();
 
 	/************************************************
-	 * 
 	 * @功能 定义方法实现
 	 * @author wzhuo
-	 * 
 	 *         1.UpdateSampleTabs 采样结果的收集和汇总 2.DecisionModel 分配计划的制订
 	 *         2.DecisionModel 制订分配计划 3.addMicPartition
 	 *         将决策后的链表添加到获取分区的动作中，每次取出属于该task的所有分区 4.getAllonAtask
 	 *         将属于该task的所有分区从制订的分区计划中取出，返回一个数组
-	 * 
-	 * 
 	 ************************************************/
 	//1.采样结果的收集,每次更新localTabls
 	public void UpdateLocalSampleTabs(String localSampleMess, String mapTaskId) {
@@ -411,6 +405,7 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 		//LOG.info("GlobalSampleTabs_init####={" + GlobalSampleTabs + "}");
 
 		//更新全局采样结果表，即将各节点的结果进行汇总
+		TotalSampleTuples = 0;
 		Iterator nodeiter = LocalSampleTabs.entrySet().iterator();
 		//遍历各节点，取出相同的分区值
 		while (nodeiter.hasNext()) {
@@ -437,6 +432,7 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 					npmes.micPID = mid;
 					npmes.micPValue = total + mval;
 					GlobalSampleTabs.put(mid, npmes);
+					TotalSampleTuples += npmes.micPValue;
 				}
 			}
 		}
@@ -448,6 +444,7 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 
 		//LOCKDECISIONMODE--;
 		//每次决策是首先初始化ReduceLoad
+
 		Iterator initloadite = ReduceLoad.entrySet().iterator();
 		while (initloadite.hasNext()) {
 			Map.Entry loadentent = (Map.Entry) initloadite.next();
@@ -489,17 +486,123 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 		//LOG.info("ReduceLoad_B@@={" + ReduceLoad + "}");
 
 		//分配算法
+//		Map<Integer, Long> oneAssiPs = new HashMap<Integer, Long>();
+//		oneAssiPs.putAll(UnAssiMicP);
+//		//（1）取出未分配分区的个数,每次取出剩余的一半
+//		long onceAssPNum = 0;  //每次要分配的分区个数
+//		if (JobInProgress.finishedMapTasks == JobInProgress.numMapTasks) {
+//			onceAssPNum = UnAssiMicP.size();
+//		} else {
+//			onceAssPNum = GlobalSampleTabs.size() / MapTask.PARTITION_EXPAND_FACTOR;
+//		}
+
+		//////////////////////////////////////////////////
+		// MDP
+		// 功能：（1） 对采集的数据集按照从大到小的顺序排序；
+		//      （2） 计算所有已分配和所有未分配的数据总量；
+		//      （3） 计算可采取动作的所有值函数；
+		//      （4） 按照贪心策略进行分配分区（向最小负载节点分配）；
+		//
+		//////////////////////////////////////////////////
+		long[][] arryUnAssiMicP = new long[2][UnAssiMicP.size()];
+		long[] arryAssiMicP = new long[AssiMicP.size()];
+
+		//(1)将未分配分区的值取出放到一个2维数组里，第一行表示原始编号，第二行表示已采集到的数据量
+		Iterator unAssiMicP = UnAssiMicP.entrySet().iterator();
+		for (int i = 0; i < UnAssiMicP.size(); i++) {
+			Map.Entry uneachAssiMicP = (Map.Entry) unAssiMicP.next();
+			Integer unAssinmicid = (Integer) uneachAssiMicP.getKey();
+			Long unAssinmicval = (Long) uneachAssiMicP.getValue();
+
+			arryUnAssiMicP[0][i] = unAssinmicid;
+			arryUnAssiMicP[1][i] = unAssinmicval;
+		}
+
+		//对未分配的2维数组排序，从数据量大到小
+		for (int i = 0; i < arryUnAssiMicP[1].length; i++) {
+			long maxid = arryUnAssiMicP[0][i];
+			long maxnum = arryUnAssiMicP[1][i];
+			int maxdid = 0;
+
+			for (int j = i + 1; j < arryUnAssiMicP[1].length; j++) {
+				if (maxnum < arryUnAssiMicP[1][j]) {
+					maxid = arryUnAssiMicP[0][j];
+					maxnum = arryUnAssiMicP[1][j];
+					maxdid = j;
+				}
+			}
+
+			long tempval = 0;
+
+			if (maxid != arryUnAssiMicP[0][i]) {
+				tempval = arryUnAssiMicP[1][i];
+				arryUnAssiMicP[0][maxdid] = arryUnAssiMicP[0][i];
+				arryUnAssiMicP[1][maxdid] = tempval;
+
+				arryUnAssiMicP[0][i] = maxid;
+				arryUnAssiMicP[1][i] = maxnum;
+
+			} else {
+				continue;
+			}
+		}
+
+		//(2)计算所有已分配和未分配分区的数据总量，用于估计值函数使用
+		long Assin_totalMicPVal = 0;
+		long unAssin_totalMicPVal = 0;
+
+		for (int i = 0; i < GlobalSampleTabs.size(); i++) {
+			if (UnAssiMicP.containsKey(i)) {
+				unAssin_totalMicPVal += GlobalSampleTabs.get(i).micPValue;
+			}
+			if (AssiMicP.contains(i)) {
+				Assin_totalMicPVal += GlobalSampleTabs.get(i).micPValue;
+			}
+		}
+
+		//(3) 对于未分配的分区计算，取出值函数最大的前n个分区
+		double[] EvalueArray = new double[UnAssiMicP.size()];
+		double problity = 0;
+		long Totaltuples = 0;
+		long readytoAssi = 0; //准备要分配的量
+		Totaltuples = Math.round(((double) TotalSampleTuples / JobProgressingTime)); //估算出总的原组数
+		long restTotal = Totaltuples - TotalSampleTuples; //还未产生的总原组数
+		double rate = unAssin_totalMicPVal / TotalSampleTuples; //总采样量中，未分配的所占的总比例；
+		long noAssinTotal = Math.round(rate * restTotal); //估算未产生原组中，未分配的总量；
+
+		for (int i = 0; i < EvalueArray.length; i++) {
+			
+			readytoAssi += arryUnAssiMicP[1][i];
+			
+			problity = (double) (readytoAssi + noAssinTotal) / (Totaltuples - Assin_totalMicPVal);
+			
+			EvalueArray[i] = problity * (Totaltuples - readytoAssi - Assin_totalMicPVal);
+		}
+
 		Map<Integer, Long> oneAssiPs = new HashMap<Integer, Long>();
 		oneAssiPs.putAll(UnAssiMicP);
-		//（1）取出未分配分区的个数,每次取出剩余的一半
-		//int onceAssPNum = UnAssiMicP.size() / 2 + 1;
-		int onceAssPNum = 0;
-		if(JobInProgress.finishedMapTasks== JobInProgress.numMapTasks){
-			onceAssPNum = UnAssiMicP.size();
-		}else{
-			onceAssPNum = GlobalSampleTabs.size()/MapTask.PARTITION_EXPAND_FACTOR;	
+		double onceAssPval = 0.0;
+		long onceAssPNum = 0;  //本来要分配的分区个数
+		for (int i = 0; i < EvalueArray.length; i++) {
+			if (onceAssPval < EvalueArray[i]) {
+				onceAssPval = EvalueArray[i];
+				onceAssPNum = i;
+			}
 		}
 		
+		//确保最后一次分配的个数为 Reducer的个数，
+		if ((UnAssiMicP.size() - onceAssPNum) <= ReduceLoad.size()) {
+			onceAssPNum = UnAssiMicP.size();
+		}
+
+		//保证运行到95时分配完成；
+		if (JobProgressingTime >= 0.95) {
+			onceAssPNum = UnAssiMicP.size();
+		}
+		
+		//////////////////////////////////////////////////
+
+		//(4)按照从大到小原则进行指派
 		while (onceAssPNum > 0) {
 			long maxPValue = 0; //记录最大负载分区的量
 			int maxPID = 0; //记录量最大负载分区所对应的分区值
@@ -605,16 +708,16 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 					continue;
 				} else {
 					for (int i = 0; i < toArrPart.size(); i++) {
-							if (!AssiMicP.contains(toArrPart.get(i))) {
-								AssiMicP.add(toArrPart.get(i));
-								LOG.info("InitAssiMicP.size()={" + AssiMicP.size() + "}{"
-									+ GlobalSampleTabs.size() + "}");
-							}
-							if((JobProgressingTime == 1.0) && (toArrPart.get(i) == 0) ){
-								AssiMicP.add(toArrPart.get(i));
-								LOG.info("All0AssiMicP.size()={" + AssiMicP.size() + "}{"
-									+ GlobalSampleTabs.size() + "}");
-							}
+						if (!AssiMicP.contains(toArrPart.get(i))) {
+							AssiMicP.add(toArrPart.get(i));
+							LOG.info("InitAssiMicP.size()={" + AssiMicP.size() + "}{"
+								+ GlobalSampleTabs.size() + "}");
+						}
+						if ((JobProgressingTime == 1.0) && (toArrPart.get(i) == 0)) {
+							AssiMicP.add(toArrPart.get(i));
+							LOG.info("All0AssiMicP.size()={" + AssiMicP.size() + "}{"
+								+ GlobalSampleTabs.size() + "}");
+						}
 					}
 
 					//判断是否整体完成
@@ -638,16 +741,12 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 	}
 
 	/*********************
-	 * 
 	 * @功能 定义方法实现
-	 * 
 	 *     add static balance end
-	 * 
 	 ********************/
 
 	/**
 	 * Start the JobTracker with given configuration.
-	 * 
 	 * The conf will be modified to reflect the actual ports on which the
 	 * JobTracker is up and running if the user passes the port as
 	 * <code>zero</code>.
@@ -1191,7 +1290,6 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 
 		/**
 		 * Increments faults(blacklist by job) for the tracker by one.
-		 * 
 		 * Adds the tracker to the potentially faulty list. Assumes JobTracker
 		 * is locked on the entry.
 		 * 
@@ -1308,7 +1406,6 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 
 		/**
 		 * Check whether tasks can be assigned to the tracker.
-		 * 
 		 * Faults are stored in a multi-bucket, circular sliding window; when
 		 * the implicit "time pointer" moves across a bucket boundary into the
 		 * oldest bucket, that bucket's faults are cleared, and it becomes the
@@ -1317,7 +1414,6 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 		 * with TRACKER_FAULT_BUCKET_WIDTH), and the sum over all buckets is
 		 * compared with TRACKER_FAULT_THRESHOLD to determine whether
 		 * graylisting is warranted (or, alternatively, if it should be lifted).
-		 * 
 		 * Assumes JobTracker is locked on entry.
 		 * 
 		 * @param hostName
@@ -1380,7 +1476,6 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 		/**
 		 * Removes the tracker from the blacklist, graylist, and
 		 * potentially-faulty list, when it is restarted.
-		 * 
 		 * Assumes JobTracker is locked on the entry.
 		 * 
 		 * @param hostName
@@ -1444,7 +1539,6 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 		/**
 		 * Whether a host is blacklisted (by health-check script) across all
 		 * jobs.
-		 * 
 		 * Assumes JobTracker is locked on the entry.
 		 * 
 		 * @param hostName
@@ -1463,7 +1557,6 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 
 		/**
 		 * Whether a host is graylisted (by heuristics) "across all jobs".
-		 * 
 		 * Assumes JobTracker is locked on the entry.
 		 * 
 		 * @param hostName
@@ -1513,7 +1606,6 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 
 	/**
 	 * Get all task tracker statuses on given host
-	 * 
 	 * Assumes JobTracker is locked on the entry
 	 * 
 	 * @param hostName
@@ -1534,7 +1626,6 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 
 	/**
 	 * Get total number of task trackers on given host
-	 * 
 	 * Assumes JobTracker is locked on the entry
 	 * 
 	 * @param hostName
@@ -1868,10 +1959,8 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 		 * current count which is (old count + 1). The whole purpose of this api
 		 * is to obtain restart counts across restarts to avoid attempt-id
 		 * clashes.
-		 * 
 		 * Note that in between if the jobtracker.info files goes missing then
 		 * the jobtracker will disable recovery and continue.
-		 * 
 		 */
 		void updateRestartCount() throws IOException {
 			Path restartFile = getRestartCountFile();
@@ -3133,7 +3222,6 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 	 * Whether the tracker is blacklisted or not
 	 * 
 	 * @param trackerID
-	 * 
 	 * @return true if blacklisted, false otherwise
 	 */
 	synchronized public boolean isBlacklisted(String trackerID) {
@@ -3148,7 +3236,6 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 	 * Whether the tracker is graylisted or not
 	 * 
 	 * @param trackerID
-	 * 
 	 * @return true if graylisted, false otherwise
 	 */
 	synchronized public boolean isGraylisted(String trackerID) {
@@ -3182,7 +3269,6 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 	/**
 	 * Adds a new node to the jobtracker. It involves adding it to the expiry
 	 * thread and adding it for resolution
-	 * 
 	 * Assumes JobTracker, taskTrackers and trackerExpiryQueue is locked on
 	 * entry
 	 * 
@@ -3318,7 +3404,6 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 	/**
 	 * The periodic heartbeat mechanism between the {@link TaskTracker} and the
 	 * {@link JobTracker}.
-	 * 
 	 * The {@link JobTracker} processes the status information sent by the
 	 * {@link TaskTracker} and responds with instructions to start/stop tasks or
 	 * jobs, and also 'reset' instructions during contingencies.
@@ -3336,9 +3421,7 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 		 * 
 		 * @author wzhuo
 		 * @功能 接受来自task的信息对采样信息进行汇总 更新GlobalSampleTabs
-		 * 
 		 *     InfoFromTaskTracker中的信息是单个节点上所有MapTask的采样信息汇总
-		 * 
 		 ********************/
 		if (status.InfoFromTaskTracker.equals("These is null") == false) {
 			if (TaskNameList.equals(status.getTrackerName()) == false) {
@@ -3444,7 +3527,6 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 		 * 
 		 * @author wzhuo
 		 * @功能 (1)定义决策时机和reduce的初始化 (2)决策方案的制订
-		 * 
 		 ********************/
 		//获取该heartbeat中所包含的所有tasks的信息
 		Set<TaskAttemptID> nodeTasks = trackerToTaskMap.get(trackerName);
@@ -3453,7 +3535,7 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 			//(1)获取该heartbeat中该节点上包含的所有tasks的信息
 			for (TaskAttemptID onetaskId : nodeTasks) {
 				JobStatus thisjobstatus = getJobStatus(onetaskId.getJobID());
-				JobProgressingTime = thisjobstatus.mapProgress();
+				JobProgressingTime =  thisjobstatus.mapProgress();
 
 				//如果是maptask，进行判断
 				if (onetaskId.isMap()) {
@@ -3495,8 +3577,9 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 		//如果该maptask还没有被分配，并且运行到该task的80%
 		double lastDECISIONTIME = 0.0;
 
-		if ((UnAssiMicP.isEmpty() == false) && (JobInProgress.finishedMapTasks >= 0.5)
-			&& ((JobProgressingTime - lastDECISIONTIME) >= 0.1 || JobInProgress.finishedMapTasks== JobInProgress.numMapTasks) 
+		if ((UnAssiMicP.isEmpty() == false)
+			&& (JobInProgress.finishedMapTasks >= 0.5)
+			&& ((JobProgressingTime - lastDECISIONTIME) >= 0.1 || JobInProgress.finishedMapTasks == JobInProgress.numMapTasks)
 			&& (EachAssPlan.isEmpty())) {
 			if (DecisionModel()) {
 				lastDECISIONTIME = JobProgressingTime;
@@ -4014,7 +4097,6 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 
 	/**
 	 * JobTracker.submitJob() kicks off a new job.
-	 * 
 	 * Create a 'JobInProgress' object, which contains both JobProfile and
 	 * JobStatus. Those two sub-objects are sometimes shipped outside of the
 	 * JobTracker. But JobInProgress adds info that's useful for the JobTracker
@@ -4026,7 +4108,6 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 
 	/**
 	 * JobTracker.submitJob() kicks off a new job.
-	 * 
 	 * Create a 'JobInProgress' object, which contains both JobProfile and
 	 * JobStatus. Those two sub-objects are sometimes shipped outside of the
 	 * JobTracker. But JobInProgress adds info that's useful for the JobTracker
@@ -4554,7 +4635,6 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 	/*
 	 * Returns a list of TaskCompletionEvent for the given job, starting from
 	 * fromEventId.
-	 * 
 	 * @see
 	 * org.apache.hadoop.mapred.JobSubmissionProtocol#getTaskCompletionEvents
 	 * (java.lang.String, int, int)
@@ -5268,7 +5348,6 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 	}
 
 	/**
-	 * 
 	 * @return true if delegation token operation is allowed
 	 */
 	private boolean isAllowedDelegationTokenOp() throws IOException {

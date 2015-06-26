@@ -294,7 +294,7 @@ class MapTask extends Task {
 			return stats == null ? 0 : stats.getBytesRead();
 		}
 	}
-
+ 
 	/**
 	 * This class skips the records based on the failed ranges from previous
 	 * attempts.
