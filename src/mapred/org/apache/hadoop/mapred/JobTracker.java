@@ -380,7 +380,7 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 				LocalSampleTabs.put(mapTaskId, localtoalsample);
 			}
 		}
-		//LOG.info("LocalSampleTabssssss" + LocalSampleTabs);
+		LOG.info("LocalSampleTabssssss" + LocalSampleTabs);
 	}
 
 	//2.更新global表
@@ -436,7 +436,7 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 				}
 			}
 		}
-		//LOG.info("GlobalSampleTabs####={" + GlobalSampleTabs + "}");
+		LOG.info("GlobalSampleTabs####={" + GlobalSampleTabs + "}");
 	}
 
 	//3.制订分配计划
@@ -483,7 +483,7 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 			}
 		}
 		//LOG.info("EachD_UnB##=" + UnAssiMicP + "}");
-		//LOG.info("ReduceLoad_B@@={" + ReduceLoad + "}");
+		LOG.info("ReduceLoad_B@@={" + ReduceLoad + "}");
 
 		//分配算法
 //		Map<Integer, Long> oneAssiPs = new HashMap<Integer, Long>();
@@ -504,6 +504,8 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 		//      （4） 按照贪心策略进行分配分区（向最小负载节点分配）；
 		//
 		//////////////////////////////////////////////////
+		LOG.info("beginMDP#######");
+		
 		long[][] arryUnAssiMicP = new long[2][UnAssiMicP.size()];
 		long[] arryAssiMicP = new long[AssiMicP.size()];
 
@@ -559,6 +561,12 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 				Assin_totalMicPVal += GlobalSampleTabs.get(i).micPValue;
 			}
 		}
+		for (int i = 0; i < 2; i++) {
+			for (int j = 0; j < arryUnAssiMicP[1].length; j++) {
+				LOG.info("arryUnAssiMicP****["+i+j+"]="+arryUnAssiMicP[i][j] + "  ");
+			}
+		}
+		
 
 		//(3) 对于未分配的分区计算，取出值函数最大的前n个分区
 		double[] EvalueArray = new double[UnAssiMicP.size()];
@@ -596,7 +604,7 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 		}
 
 		//保证运行到95时分配完成；
-		if (JobProgressingTime >= 0.95) {
+		if ((JobProgressingTime >= 0.95) || (JobInProgress.finishedMapTasks == JobInProgress.numMapTasks) ) {
 			onceAssPNum = UnAssiMicP.size();
 		}
 		
@@ -3575,11 +3583,13 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 		} //end if
 
 		//如果该maptask还没有被分配，并且运行到该task的80%
+		
+		//&& (JobInProgress.finishedMapTasks >= 0.5) 
+		//
+		
 		double lastDECISIONTIME = 0.0;
-
 		if ((UnAssiMicP.isEmpty() == false)
-			&& (JobInProgress.finishedMapTasks >= 0.5)
-			&& ((JobProgressingTime - lastDECISIONTIME) >= 0.1 || JobInProgress.finishedMapTasks == JobInProgress.numMapTasks)
+			&& (((JobProgressingTime - lastDECISIONTIME) >= 0.1) || (JobInProgress.finishedMapTasks == JobInProgress.numMapTasks))
 			&& (EachAssPlan.isEmpty())) {
 			if (DecisionModel()) {
 				lastDECISIONTIME = JobProgressingTime;

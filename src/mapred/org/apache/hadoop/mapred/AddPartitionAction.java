@@ -11,7 +11,7 @@ import java.util.List;
  * partitions into a running {@link org.apache.hadoop.mapred.ReduceTask} 
  * @author youli
  *
- */
+ */ 
 public class AddPartitionAction extends TaskTrackerAction {
 
 	private TaskAttemptID taskId;
@@ -19,7 +19,7 @@ public class AddPartitionAction extends TaskTrackerAction {
 	private int[] parts;
 	public AddPartitionAction() {
 		super(TaskTrackerAction.ActionType.ADD_PARTITION);
-	} 
+	}
 	public AddPartitionAction(TaskAttemptID taskID, int[] pts, boolean finish){
 		super(TaskTrackerAction.ActionType.ADD_PARTITION);
 		this.taskId = taskID;
