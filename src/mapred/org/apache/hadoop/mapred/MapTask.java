@@ -99,7 +99,7 @@ class MapTask extends Task {
 //		 * add end 
 //		 */  
 
-	public static int PARTITION_EXPAND_FACTOR = 5;// 4*5=20
+	public static int PARTITION_EXPAND_FACTOR = 10;// 4*5=20
 	//public static int TOTAL_MICRO_PARTITIONS = 8;
 	/**
 	 * The size of each record in the index file for the map-outputs.

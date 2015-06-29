@@ -380,7 +380,7 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 				LocalSampleTabs.put(mapTaskId, localtoalsample);
 			}
 		}
-		LOG.info("LocalSampleTabssssss" + LocalSampleTabs);
+		//LOG.info("LocalSampleTabssssss" + LocalSampleTabs);
 	}
 
 	//2.更新global表
@@ -483,7 +483,7 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 			}
 		}
 		//LOG.info("EachD_UnB##=" + UnAssiMicP + "}");
-		LOG.info("ReduceLoad_B@@={" + ReduceLoad + "}");
+		//LOG.info("ReduceLoad_B@@={" + ReduceLoad + "}");
 
 		//分配算法
 //		Map<Integer, Long> oneAssiPs = new HashMap<Integer, Long>();
@@ -563,7 +563,7 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 		}
 		for (int i = 0; i < 2; i++) {
 			for (int j = 0; j < arryUnAssiMicP[1].length; j++) {
-				LOG.info("arryUnAssiMicP****["+i+j+"]="+arryUnAssiMicP[i][j] + "  ");
+				LOG.info("arryUnAssiMicP****["+i+"]["+j+"]="+arryUnAssiMicP[i][j] + "  ");
 			}
 		}
 		
@@ -3549,7 +3549,7 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 				if (onetaskId.isMap()) {
 					continue;
 				}
-
+				
 				//如果是reducetask，将初始化得到的Reduce代号放到已分配的Map中
 				if (ReduceCoMicPs.containsKey(onetaskId) == false) {
 					//初始化未分配分区链表
@@ -3578,7 +3578,9 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 					ReduceFinished.put(onetaskId, "false");
 					//初始化reduce的负载矩阵
 					ReduceLoad.put(onetaskId, (long) 0);
+					LOG.info("UnAssiMicP_Before)"+UnAssiMicP);
 				}
+			
 			}// for
 		} //end if
 
@@ -3590,10 +3592,10 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 		double lastDECISIONTIME = 0.0;
 		if ((UnAssiMicP.isEmpty() == false)
 			&& (((JobProgressingTime - lastDECISIONTIME) >= 0.1) || (JobInProgress.finishedMapTasks == JobInProgress.numMapTasks))
-			&& (EachAssPlan.isEmpty())) {
+			&& (EachAssPlan.isEmpty()) && (JobInProgress.finishedMapTasks>=1)) {
 			if (DecisionModel()) {
 				lastDECISIONTIME = JobProgressingTime;
-				//LOG.info("lastDECISIONTIME%%{" + lastDECISIONTIME + "}");
+				LOG.info("lastDECISIONTIME%%{" + lastDECISIONTIME + "}");
 			}
 		}
 
