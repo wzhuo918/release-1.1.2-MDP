@@ -324,7 +324,6 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 	public long TotalSampleTuples = 0;
 	public boolean FirstD = true;
 	public boolean SecondD = false;
-	
 
 	//用于表示采样信息所在节点的链表
 	public List<String> TaskNameList = new LinkedList<String>();
@@ -337,12 +336,10 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 	public Map<Integer, Long> UnAssiMicP = new HashMap<Integer, Long>();
 	//定义已分配分区的链表
 	public List<Integer> AssiMicP = new LinkedList<Integer>();
-	//定义已完成分配的Reducetask
-	public Map<TaskAttemptID, String> ReduceFinished = new HashMap<TaskAttemptID, String>();
+		//定义已完成分配的Reducetask
+		public Map<TaskAttemptID, String> ReduceFinished = new HashMap<TaskAttemptID, String>();
 	//定义当前决策时各Reduce的负载量 <ReduceTaskId, 该节点上总的负载量>
 	public Map<TaskAttemptID, Long> ReduceLoad = new HashMap<TaskAttemptID, Long>();
-	//定义ReduceFinished链表
-	//public Map<TaskAttemptID, String> ReduceFinished = new HashMap<TaskAttemptID, String>();
 	//各Reduce上所有分区的信息<TaskId, <MicroPlist>>
 	public Map<TaskAttemptID, LinkedList<Integer>> ReduceCoMicPs = new HashMap<TaskAttemptID, LinkedList<Integer>>();
 	//每轮的决策方案，只有已当当前轮分配完成后，才开始下轮的分配
@@ -393,6 +390,7 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 		Iterator globaliter = LocalSampleTabs.entrySet().iterator();
 		while (globaliter.hasNext()) {
 			Map.Entry nodeent = (Map.Entry) globaliter.next();
+			@SuppressWarnings("unchecked")
 			HashMap<Integer, Long> globaltent = (HashMap<Integer, Long>) nodeent.getValue();
 
 			//初始化GlobalTables
@@ -523,8 +521,6 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 			arryUnAssiMicP[1][i] = unAssinmicval;
 		}
 
-		
-		
 		//对未分配的2维数组排序，从数据量大到小
 		for (int i = 0; i < arryUnAssiMicP[1].length; i++) {
 			long maxid = arryUnAssiMicP[0][i];
@@ -618,7 +614,7 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 				onceAssPNum = i;
 			}
 		}
-/**
+
 		//确保多次分配，控制前几轮分配的个数
 		if ((double) onceAssPNum / GlobalSampleTabs.size() > JobProgressingTime) {
 			onceAssPNum = Math.round(JobProgressingTime * GlobalSampleTabs.size());
@@ -633,24 +629,21 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 			}
 		}
 
-		**/
-/////////////////////////////////////////////
-//		long onceAssPNum = 0;  //本来要分配的分区个数
-//		Map<Integer, Long> oneAssiPs = new HashMap<Integer, Long>();
-//		oneAssiPs.putAll(UnAssiMicP);
-		
-		if(FirstD = true){
-			onceAssPNum =(int) GlobalSampleTabs.size() / 2;
-		}
-		if(SecondD = true){
-			onceAssPNum = UnAssiMicP.size();
-		}
-		
-		
-/////////////////////////////////////////////	
-		
-		
-		
+		/////////////////////////////////////////////
+		//		long onceAssPNum = 0;  //本来要分配的分区个数
+		//		Map<Integer, Long> oneAssiPs = new HashMap<Integer, Long>();
+		//		oneAssiPs.putAll(UnAssiMicP);
+
+		//		if(FirstD = true){
+		//			onceAssPNum =(int) GlobalSampleTabs.size() / 2;
+		//		}
+		//		if(SecondD = true){
+		//			onceAssPNum = UnAssiMicP.size();
+		//		}
+		//		
+
+		/////////////////////////////////////////////	
+
 		LOG.info("  onceAssPNum[" + onceAssPNum + "]  ");
 		//////////////////////////////////////////////////
 
@@ -665,16 +658,16 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 			maxPID = (int) arryUnAssiMicP[0][i];
 			maxPValue = arryUnAssiMicP[1][i];
 
-						Iterator oneasspitor = oneAssiPs.entrySet().iterator();
-						while (oneasspitor.hasNext()) {
-							Map.Entry oneasspent = (Map.Entry) oneasspitor.next();
-							Integer onceasspid = (Integer) oneasspent.getKey();
-							Long onceasspval = (Long) oneasspent.getValue();
-							if (onceasspval > maxPValue) {
-								maxPValue = onceasspval;
-								maxPID = onceasspid;
-							}
-						}
+			Iterator oneasspitor = oneAssiPs.entrySet().iterator();
+			while (oneasspitor.hasNext()) {
+				Map.Entry oneasspent = (Map.Entry) oneasspitor.next();
+				Integer onceasspid = (Integer) oneasspent.getKey();
+				Long onceasspval = (Long) oneasspent.getValue();
+				if (onceasspval > maxPValue) {
+					maxPValue = onceasspval;
+					maxPID = onceasspid;
+				}
+			}
 
 			//LOG.info("maxPValue={"+maxPValue+"};maxPID={"+maxPID+"}");
 
@@ -715,13 +708,13 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 					}
 					ReduceLoad.put(eachtaskid, maxPValue + ReduceLoad.get(eachtaskid)); //更新最大负载节点
 					oneAssiPs.remove(maxPID); //更新未分配的链表
-					UnAssiMicP.remove(maxPID);
+					//UnAssiMicP.remove(maxPID);
 				}
 			}
 		}
-		//LOG.info("EachD_UnA##=" + UnAssiMicP + "}");
-		//LOG.info("EachAssPlan!!={" + EachAssPlan + "}");
-		//LOG.info("ReduceLoad_A@@@@=" + ReduceLoad + "}");
+		LOG.info("EachD_UnA##=" + UnAssiMicP + "}");
+		LOG.info("EachAssPlan!!={" + EachAssPlan + "}");
+		LOG.info("ReduceLoad_A@@@@=" + ReduceLoad + "}");
 
 		return true;
 	}
@@ -738,93 +731,87 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 		for (TaskAttemptID taskId : taskIds) {
 			// LOG.info(trackerName+"上面运行的taskid是"+taskId);
 			if (taskId.isMap()) {
-				//JobStatus thisjobstatus = getJobStatus(taskId.getJobID());
-				//JobProgressingTime = thisjobstatus.mapProgress();
 				continue;
 			}
-
-			String thisRIdfinished = ReduceFinished.get(taskId);
-//			LinkedList<Integer> toArrPart = EachAssPlan.get(taskId);
-//			
-//			if(toArrPart == null){
-//				if(UnAssiMicP.size() == 0){
-//					ReduceFinished.put(taskId, "true");
-//					addPartitionList.add(new AddPartitionAction(taskId, new int[0], true));
-//				}else{
-//					
-//					addPartitionList.add(new AddPartitionAction(taskId, toArrPart, false));
-//				}				
-//			}else{
-//				if(UnAssiMicP.size() == 0){
-//					for (int i = 0; i < toArrPart.size(); i++) {
-//						if (!AssiMicP.contains(toArrPart.get(i))) {
-//							AssiMicP.add(toArrPart.get(i));
-//							//LOG.info("InitAssiMicP.size()={" + AssiMicP.size() + "}{"+ GlobalSampleTabs.size() + "}");
-//						}
-//					}
-//					ReduceFinished.put(taskId, "true");
-//					addPartitionList.add(new AddPartitionAction(taskId, toArrPart, true));
-//				}else{
-//					for (int i = 0; i < toArrPart.size(); i++) {
-//						if (!AssiMicP.contains(toArrPart.get(i))) {
-//							AssiMicP.add(toArrPart.get(i));
-//							//LOG.info("InitAssiMicP.size()={" + AssiMicP.size() + "}{"+ GlobalSampleTabs.size() + "}");
-//						}
-//					}
-//					addPartitionList.add(new AddPartitionAction(taskId, toArrPart, false));
-//					
-//				}
-//			}
-//			EachAssPlan.remove(taskId);
 			
-			
-			
-			//当前reducetask还未完成
-			if (thisRIdfinished.equals("true")) {
-				//addPartitionList.add(new AddPartitionAction(taskId, new int[0], true));
-				//LOG.info("addPartitionList_1add@@{" + addPartitionList + "}");
-				continue;
-			} else {
-				LinkedList<Integer> toArrPart = EachAssPlan.get(taskId);
+			LinkedList<Integer> toArrPart = EachAssPlan.get(taskId);
+			LinkedList<Integer> addtoArrPart =new LinkedList<Integer>();
 
-				if (toArrPart == null) {
-					//判断是否整体完成
-					if (AssiMicP.size() == GlobalSampleTabs.size()) {
-						ReduceFinished.put(taskId, "true");
-						addPartitionList.add(new AddPartitionAction(taskId, new int[0], true));
-						//LOG.info("addPartitionList_2add@@{" + ReduceFinished + "}");
+			/**
+			 * MDP修改的分配方法
+			 */
+			if (toArrPart != null) {
+				for (int i = 0; i < toArrPart.size(); i++) {
+					if (AssiMicP.contains(toArrPart.get(i)) == false) {
+						AssiMicP.add(toArrPart.get(i));
+						UnAssiMicP.remove(toArrPart.get(i));
+						addtoArrPart.add(toArrPart.get(i));
 					}
-					continue;
-				} else {
-					for (int i = 0; i < toArrPart.size(); i++) {
-						if (!AssiMicP.contains(toArrPart.get(i))) {
-							AssiMicP.add(toArrPart.get(i));
-							//							LOG.info("InitAssiMicP.size()={" + AssiMicP.size() + "}{"
-							//								+ GlobalSampleTabs.size() + "}");
-						}
-						if ((JobProgressingTime == 1.0) && (toArrPart.get(i) == 0)) {
-							AssiMicP.add(toArrPart.get(i));
-							//							LOG.info("All0AssiMicP.size()={" + AssiMicP.size() + "}{"
-							//								+ GlobalSampleTabs.size() + "}");
-						}
-					}
-
-					//判断是否整体完成
-					if (AssiMicP.size() == GlobalSampleTabs.size()) {
-						ReduceFinished.put(taskId, "true");
-						addPartitionList.add(new AddPartitionAction(taskId, toArrPart, true));
-						//						LOG.info("addPartitionList_3add@@" + addPartitionList);
-						//						LOG.info("AssiMicP.size()={" + AssiMicP.size() + "}{" + GlobalSampleTabs.size() + "}");
-					} else {
-						addPartitionList.add(new AddPartitionAction(taskId, toArrPart, false));
-						//						LOG.info("addPartitionList_4add@@" + addPartitionList);
-						//						LOG.info("AssiMicP.size()={" + AssiMicP.size() + "}{" + GlobalSampleTabs.size() + "}");
-					}
+				}
+				addPartitionList.add(new AddPartitionAction(taskId, addtoArrPart, false));
+				EachAssPlan.remove(taskId);
+				return addPartitionList;
+			}else{
+				if(UnAssiMicP.isEmpty() && (AssiMicP.size() == GlobalSampleTabs.size()) && GlobalSampleTabs.size()>0){
+					addPartitionList.add(new AddPartitionAction(taskId, new int[0], true));
+					ReduceFinished.put(taskId, "true");
+					return addPartitionList;
+				}
+				if((UnAssiMicP.isEmpty() ==false) && (toArrPart==null)){
 					EachAssPlan.remove(taskId);
-					//return addPartitionList;
+					return addPartitionList;
 				}
 			}
-			return addPartitionList;
+			
+			/**
+			 * 修改前的方法
+			 */
+			//当前reducetask还未完成
+			//			if (thisRIdfinished.equals("true")) {
+			//				//addPartitionList.add(new AddPartitionAction(taskId, new int[0], true));
+			//				//LOG.info("addPartitionList_1add@@{" + addPartitionList + "}");
+			//				continue;
+			//			} else {
+			//				LinkedList<Integer> toArrPart = EachAssPlan.get(taskId);
+			//
+			//				if (toArrPart == null) {
+			//					//判断是否整体完成
+			//					if (AssiMicP.size() == GlobalSampleTabs.size()) {
+			//						ReduceFinished.put(taskId, "true");
+			//						addPartitionList.add(new AddPartitionAction(taskId, new int[0], true));
+			//						//LOG.info("addPartitionList_2add@@{" + ReduceFinished + "}");
+			//					}
+			//					continue;
+			//				} else {
+			//					for (int i = 0; i < toArrPart.size(); i++) {
+			//						if (!AssiMicP.contains(toArrPart.get(i))) {
+			//							AssiMicP.add(toArrPart.get(i));
+			//							//							LOG.info("InitAssiMicP.size()={" + AssiMicP.size() + "}{"
+			//							//								+ GlobalSampleTabs.size() + "}");
+			//						}
+			//						if ((JobProgressingTime == 1.0) && (toArrPart.get(i) == 0)) {
+			//							AssiMicP.add(toArrPart.get(i));
+			//							//							LOG.info("All0AssiMicP.size()={" + AssiMicP.size() + "}{"
+			//							//								+ GlobalSampleTabs.size() + "}");
+			//						}
+			//					}
+			//
+			//					//判断是否整体完成
+			//					if (AssiMicP.size() == GlobalSampleTabs.size()) {
+			//						ReduceFinished.put(taskId, "true");
+			//						addPartitionList.add(new AddPartitionAction(taskId, toArrPart, true));
+			//						//						LOG.info("addPartitionList_3add@@" + addPartitionList);
+			//						//						LOG.info("AssiMicP.size()={" + AssiMicP.size() + "}{" + GlobalSampleTabs.size() + "}");
+			//					} else {
+			//						addPartitionList.add(new AddPartitionAction(taskId, toArrPart, false));
+			//						//						LOG.info("addPartitionList_4add@@" + addPartitionList);
+			//						//						LOG.info("AssiMicP.size()={" + AssiMicP.size() + "}{" + GlobalSampleTabs.size() + "}");
+			//					}
+			//					EachAssPlan.remove(taskId);
+			//					//return addPartitionList;
+			//				}
+			//			}
+			//			return addPartitionList;
 		}
 		return addPartitionList;
 	}
@@ -3666,72 +3653,58 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 				//&& (JobInProgress.finishedMapTasks >= 1)   
 				//JobInProgress.finishedMapTasks>=1
 		} //end if
+
+		//自己系统的调用方法		
 		
- 		//自己系统的调用方法		
-		if ((UnAssiMicP.isEmpty() == false)
-			&& (((JobProgressingTime - lastDECISIONTIME) >= (double) 0.1) || (JobInProgress.finishedMapTasks == JobInProgress.numMapTasks))
-			&& ( (JobProgressingTime > 0.3) || (JobInProgress.finishedMapTasks >= 1)  )
-			&& (EachAssPlan.isEmpty()) ) {
-			//LOG.info("JobProgressingTime%%{" + JobProgressingTime + "}");
-			//LOG.info("lastDECISIONTIME%%{" + lastDECISIONTIME + "}");
-			if (DecisionModel()) {
-				lastDECISIONTIME = JobProgressingTime;
+			//判断是否需要进行决策
+			if ((UnAssiMicP.isEmpty() == false)&&
+				(((JobProgressingTime - lastDECISIONTIME) >= (double) 0.1) || (JobInProgress.finishedMapTasks == JobInProgress.numMapTasks))
+				&& ((JobProgressingTime > 0.3) || (JobInProgress.finishedMapTasks >= 1))
+				&& (EachAssPlan.isEmpty())) {
+				//LOG.info("JobProgressingTime%%{" + JobProgressingTime + "}");
 				//LOG.info("lastDECISIONTIME%%{" + lastDECISIONTIME + "}");
+				if (DecisionModel()) {
+					lastDECISIONTIME = JobProgressingTime;
+					LOG.info("lastDECISIONTIME%%{" + lastDECISIONTIME + "}");
+				}
 			}
-		}
-	
-		
-		
-/////////////////////////////////////
-//		//模拟德国人系统的方法		
-//		if ((UnAssiMicP.isEmpty() == false) && FirstD
-//			&& (JobInProgress.finishedMapTasks == JobInProgress.numMapTasks)
-//			&& ( (JobProgressingTime > 0.3) )
-//			&& (EachAssPlan.isEmpty()) ) {
-//			//LOG.info("JobProgressingTime%%{" + JobProgressingTime + "}");
-//			//LOG.info("lastDECISIONTIME%%{" + lastDECISIONTIME + "}");
-//			if (DecisionModel()) {
-//				FirstD = false;
-//				SecondD = true;
-//				lastDECISIONTIME = JobProgressingTime;
-//				LOG.info("lastDECISIONTIME%%{" + lastDECISIONTIME + "}");
-//			}
-//		}else {
-//		if ((UnAssiMicP.isEmpty() == false) && SecondD
-//			&& (JobInProgress.finishedMapTasks == JobInProgress.numMapTasks)
-//			&& ( JobProgressingTime > 0.5) 	&& (EachAssPlan.isEmpty()) ) {
-//			//LOG.info("JobProgressingTime%%{" + JobProgressingTime + "}");
-//			//LOG.info("lastDECISIONTIME%%{" + lastDECISIONTIME + "}");
-//			if (DecisionModel()) {
-//				FirstD = false;
-//				SecondD = false;
-//				lastDECISIONTIME = JobProgressingTime;
-//				LOG.info("lastDECISIONTIME%%{" + lastDECISIONTIME + "}");
+			
+			//判断是否进行增加分区到Reducer上
+			if(ReduceFinished.containsValue("false")){
+				List<TaskTrackerAction> addNewPartitionList = addMicPartition(trackerName);
+				if(addNewPartitionList != null){
+					for (TaskTrackerAction ac : addNewPartitionList) {
+						LOG.info("ac@@" + ac.toString());
+					}
+					actions.addAll(addNewPartitionList);
+				}
+			}
+			
+		/////////////////////////////////////
+		//		//模拟德国人系统的方法		
+
+		///////////////////////////////////////		
+//
+//		if ((EachAssPlan.isEmpty() == false)
+//			&& ((JobProgressingTime > 0.3) || (JobInProgress.finishedMapTasks >= 1))) {
+//			List<TaskTrackerAction> addNewPartitionList = addMicPartition(trackerName);
+//			if (addNewPartitionList != null) {
+//				for (TaskTrackerAction ac : addNewPartitionList) {
+//					LOG.info("ac@@" + ac.toString());
+//				}
+//				actions.addAll(addNewPartitionList);
 //			}
 //		}
+//
+//		if (JobInProgress.finishedMapTasks == JobInProgress.numMapTasks) {
+//			List<TaskTrackerAction> addNewPartitionList = addMicPartition(trackerName);
+//			if (addNewPartitionList != null) {
+//				for (TaskTrackerAction ac : addNewPartitionList) {
+//					LOG.info("ac@@" + ac.toString());
+//				}
+//				actions.addAll(addNewPartitionList);
+//			}
 //		}
-///////////////////////////////////////		
-		
-		if ((ReduceFinished.containsValue("false") || (EachAssPlan.isEmpty() == false))
-			&& ( (JobProgressingTime > 0.3) || (JobInProgress.finishedMapTasks >= 1))) {
-			List<TaskTrackerAction> addNewPartitionList = addMicPartition(trackerName);
-			if (addNewPartitionList != null) {
-				for (TaskTrackerAction ac : addNewPartitionList) {
-					LOG.info("ac@@" + ac.toString());
-				}
-				actions.addAll(addNewPartitionList);
-			}
-		}
-		
-		if((ReduceFinished.containsValue("false") && (JobInProgress.finishedMapTasks == JobInProgress.numMapTasks) )){
-			List<TaskTrackerAction> addNewPartitionList = addMicPartition(trackerName);
-			if (addNewPartitionList != null) {
-				for (TaskTrackerAction ac : addNewPartitionList) {
-					LOG.info("ac@@" + ac.toString());
-				}
-				actions.addAll(addNewPartitionList);
-			}
-		}
 		/*********************
 		 * add static balance end
 		 ********************/
