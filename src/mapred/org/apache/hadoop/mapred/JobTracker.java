@@ -539,15 +539,15 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 		}
 
 		//(2)计算所有已分配和未分配分区的数据总量，用于估计值函数使用
-		long Assin_totalMicPVal = 0;
-		long unAssin_totalMicPVal = 0;
+		long pa_values = 0;
+		long pu_values = 0;
 
 		for (int i = 0; i < GlobalSampleTabs.size(); i++) {
 			if (UnAssiMicP.containsKey(i)) {
-				unAssin_totalMicPVal += GlobalSampleTabs.get(i).micPValue;
+				pu_values += GlobalSampleTabs.get(i).micPValue;
 			}
 			if (AssiMicP.contains(i)) {
-				Assin_totalMicPVal += GlobalSampleTabs.get(i).micPValue;
+				pa_values += GlobalSampleTabs.get(i).micPValue;
 			}
 		}
 //		for (int i = 0; i < 2; i++) {
@@ -564,20 +564,25 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 		if(JobProgressingTime > 0.9){
 			Totaltuples = Math.round(((double) TotalSampleTuples / JobProgressingTime)); //估算出总的原组数
 		}else{
-			Totaltuples = Math.round(((double) TotalSampleTuples / (JobProgressingTime + 0.1))); //估算出总的原组数
+			Totaltuples = Math.round(((double) TotalSampleTuples / (JobProgressingTime - 0.15))); //估算出总的原组数
 		}
+		//LOG.info(" Totaltuples!!!!["+Totaltuples +"] ");
 		
 		long restTotal = Totaltuples - TotalSampleTuples; //还未产生的总原组数
-		double rate = unAssin_totalMicPVal / TotalSampleTuples; //总采样量中，未分配的所占的总比例；
-		long noAssinTotal = Math.round(rate * restTotal); //估算未产生原组中，未分配的总量；
+		double rate = pu_values / TotalSampleTuples; //总采样量中，未分配的所占的总比例；
+		long uu_values = Math.round(rate * restTotal); //估算未产生原组中，未分配的总量；
+		long ua_values = restTotal - uu_values;
 
 		for (int i = 0; i < EvalueArray.length; i++) {
 
 			readytoAssi += arryUnAssiMicP[1][i];
 
-			problity = (double) (readytoAssi + noAssinTotal) / (Totaltuples - Assin_totalMicPVal);
+			problity = (double) (readytoAssi) / (restTotal+pu_values);
 
-			EvalueArray[i] = problity * (Totaltuples - readytoAssi - Assin_totalMicPVal);
+			EvalueArray[i] = problity * (uu_values + pu_values - readytoAssi - ((readytoAssi/pu_values) * uu_values));
+			
+			//LOG.info(" problity!!!!["+problity +"] ");
+			//LOG.info(" EvalueArray!!!!["+EvalueArray[i] +"] ");
 		}
 
 		Map<Integer, Long> oneAssiPs = new HashMap<Integer, Long>();
@@ -590,6 +595,7 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 				onceAssPNum = i;
 			}
 		}
+		//LOG.info(" onceAssPNum!!!!beofre["+onceAssPNum +"] ");
 
 		
 		if(onceAssPNum > Math.round( (GlobalSampleTabs.size() * (JobProgressingTime-0.1)))){
@@ -605,6 +611,7 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 			onceAssPNum = UnAssiMicP.size();
 		}
 
+		//LOG.info(" onceAssPNum!!!!["+onceAssPNum +"] ");
 		//////////////////////////////////////////////////
 
 		//(4)按照从大到小原则进行指派
@@ -3599,7 +3606,7 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 				List<TaskTrackerAction> addNewPartitionList = addMicPartition(trackerName);
 				if (addNewPartitionList != null) {
 					for (TaskTrackerAction ac : addNewPartitionList) {
-						LOG.info("ac@@" + ac.toString());
+						//LOG.info("ac@@" + ac.toString());
 					}
 					actions.addAll(addNewPartitionList);
 				}
