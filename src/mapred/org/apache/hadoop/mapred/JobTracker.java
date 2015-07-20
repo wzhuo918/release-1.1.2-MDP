@@ -323,6 +323,7 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 	public long TotalSampleTuples = 0;
 	public static int TotalReduceNum = 0;
 	public static double lastDECISIONTIME = 0.0;
+	public static boolean  GerBalance = true; 
 
 	//用于表示采样信息所在节点的链表
 	public List<String> TaskNameList = new LinkedList<String>();
@@ -583,7 +584,7 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 			
 			//LOG.info(" problity!!!!["+problity +"] ");
 			//LOG.info(" EvalueArray!!!!["+EvalueArray[i] +"] ");
-		}
+		} 
 
 		Map<Integer, Long> oneAssiPs = new HashMap<Integer, Long>();
 		oneAssiPs.putAll(UnAssiMicP);
@@ -595,9 +596,12 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 				onceAssPNum = i;
 			}
 		}
-		//LOG.info(" onceAssPNum!!!!beofre["+onceAssPNum +"] ");
-
-		
+		LOG.info(" onceAssPNum!!!!beofre["+onceAssPNum +"] ");
+		LOG.info("UnAssiMicP.size_Before=" + UnAssiMicP.size() + "}");
+		/**
+		 * 自己方法 开始
+		 */
+		//确保每次分配的个数不超过运行的比例
 		if(onceAssPNum > Math.round( (GlobalSampleTabs.size() * (JobProgressingTime-0.1)))){
 			onceAssPNum = Math.round( (GlobalSampleTabs.size() * (JobProgressingTime-0.1)));
 		}		
@@ -610,10 +614,23 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 		if ((JobProgressingTime >= 0.9) || (JobInProgress.finishedMapTasks == JobInProgress.numMapTasks)) {
 			onceAssPNum = UnAssiMicP.size();
 		}
-
-		//LOG.info(" onceAssPNum!!!!["+onceAssPNum +"] ");
+		/**
+		 * 自己方法 结束
+		 */
+		LOG.info(" onceAssPNum!!!!after["+onceAssPNum +"] ");
+		
+		//////////////////////////////////////////////////
+		//德国人方法 开始
+		//////////////////////////////////////////////////
+///		onceAssPNum = UnAssiMicP.size();
+		//////////////////////////////////////////////////
+		//结束
 		//////////////////////////////////////////////////
 
+//		if(onceAssPNum == 0){
+//			onceAssPNum =1;
+//		}
+		
 		//(4)按照从大到小原则进行指派
 		while (onceAssPNum > 0) {
 			long maxPValue = 0; //记录最大负载分区的量
@@ -635,6 +652,7 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 
 			//LOG.info("maxPValue={"+maxPValue+"};maxPID={"+maxPID+"}");
 
+			if(maxPValue >0){
 			//取出现有负载量最小的reducetask
 			Iterator oneloaditor = ReduceLoad.entrySet().iterator();
 			while (oneloaditor.hasNext()) {
@@ -672,14 +690,20 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 					}
 					ReduceLoad.put(eachtaskid, maxPValue + ReduceLoad.get(eachtaskid)); //更新最大负载节点
 					oneAssiPs.remove(maxPID); //更新未分配的链表
-					//UnAssiMicP.remove(maxPID);
+					UnAssiMicP.remove(maxPID);
 				}
+			}
+			}else{
+				UnAssiMicP.remove(maxPID);
+				oneAssiPs.remove(maxPID);
 			}
 			onceAssPNum--;
 		}
-		//LOG.info("EachD_UnA##=" + UnAssiMicP + "}");
-		//LOG.info("EachAssPlan!!={" + EachAssPlan + "}");
-		//LOG.info("ReduceLoad_A@@@@=" + ReduceLoad + "}");
+		LOG.info("UnAssiMicP.size_after=" + UnAssiMicP.size() + "}");
+		LOG.info("EachAssPlan!!={" + EachAssPlan + "}");
+		LOG.info("ReduceLoad_A@@@@=" + ReduceLoad + "}");
+		
+		LOG.info("UnAssiMicP={" + UnAssiMicP + "}");
 
 		return true;
 	}
@@ -705,7 +729,7 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 			//当前reducetask还未完成
 			if (thisRIdfinished.equals("true")) {
 				addPartitionList.add(new AddPartitionAction(taskId, new int[0], true));
-				//LOG.info("addPartitionList_1add@@{" + addPartitionList + "}");
+				LOG.info("addPartitionList_1add@@{" + addPartitionList + "}");
 				continue;
 			} else {
 				LinkedList<Integer> toArrPart = EachAssPlan.get(taskId);
@@ -715,18 +739,18 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 					if (AssiMicP.size() == GlobalSampleTabs.size()) {
 						ReduceFinished.put(taskId, "true");
 						addPartitionList.add(new AddPartitionAction(taskId, new int[0], true));
-						//LOG.info("addPartitionList_2add@@{" + ReduceFinished + "}");
+						LOG.info("addPartitionList_2add@@{" + ReduceFinished + "}");
 					}
 					continue;
 				} else {
 					for (int i = 0; i < toArrPart.size(); i++) {
 						if (!AssiMicP.contains(toArrPart.get(i))) {
 							AssiMicP.add(toArrPart.get(i));
-							UnAssiMicP.remove(toArrPart.get(i));
+							//UnAssiMicP.remove(toArrPart.get(i));
 						}
 						if ((JobProgressingTime == 1.0) && (toArrPart.get(i) == 0)) {
 							AssiMicP.add(toArrPart.get(i));
-							UnAssiMicP.remove(toArrPart.get(i));
+							//UnAssiMicP.remove(toArrPart.get(i));
 						}
 					}
 
@@ -734,12 +758,12 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 					if (AssiMicP.size() == GlobalSampleTabs.size()) {
 						ReduceFinished.put(taskId, "true");
 						addPartitionList.add(new AddPartitionAction(taskId, toArrPart, true));
-						//LOG.info("addPartitionList_3add@@" + addPartitionList);
-						//LOG.info("AssiMicP.size()={" + AssiMicP.size() + "}{" + GlobalSampleTabs.size() + "}");
+						LOG.info("addPartitionList_3add@@" + addPartitionList);
+						LOG.info("AssiMicP.size()={" + AssiMicP.size() + "}{" + GlobalSampleTabs.size() + "}");
 					} else {
 						addPartitionList.add(new AddPartitionAction(taskId, toArrPart, false));
-						//LOG.info("addPartitionList_4add@@" + addPartitionList);
-						//LOG.info("AssiMicP.size()={" + AssiMicP.size() + "}{" + GlobalSampleTabs.size() + "}");
+						LOG.info("addPartitionList_4add@@" + addPartitionList);
+						LOG.info("AssiMicP.size()={" + AssiMicP.size() + "}{" + GlobalSampleTabs.size() + "}");
 					}
 					EachAssPlan.remove(taskId);
 					//return addPartitionList;
@@ -3584,7 +3608,8 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 					ReduceFinished.put(onetaskId, "false");
 					//初始化reduce的负载矩阵
 					ReduceLoad.put(onetaskId, (long) 0);
-					//LOG.info("UnAssiMicP_Before)" + UnAssiMicP);
+					//LOG.info("UnAssiMicP_before={" + UnAssiMicP+"} ");
+					//LOG.info("UnAssiMicP_size={" + UnAssiMicP.size()+"} ");
 					//LOG.info("TotalReduceNum)" + TotalReduceNum);
 				}
 
@@ -3592,26 +3617,47 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 		} //end if
 
 		//如果该maptask还没有被分配，并且运行到该task的80%
-		if ((TotalReduceNum == ReduceCoMicPs.size()) && (ReduceCoMicPs.size()!=0) ) {
+		if ((TotalReduceNum == ReduceCoMicPs.size()) && (ReduceCoMicPs.size()!=0) && ReduceFinished.containsValue("false")) {
+			//LOG.info("TotalReduceNum%%{" + TotalReduceNum + "}"); JobInProgress.finishedMapTasks >= 1
+			/**JobInProgress.finishedMapTasks == JobInProgress.numMapTasks
+			 * 自己方法 开始
+			 */
 			if ((UnAssiMicP.isEmpty() == false)
-				&& (((JobProgressingTime - lastDECISIONTIME) >= 0.1) || (JobInProgress.finishedMapTasks == JobInProgress.numMapTasks))
-				&& (JobInProgress.finishedMapTasks >= 1)) {
+				&& (((JobProgressingTime - lastDECISIONTIME) >= 0.05) || (JobProgressingTime>0.9))
+				&& (JobInProgress.finishedMapTasks >= 1) && (EachAssPlan.isEmpty())) {
 				if (DecisionModel()) {
 					lastDECISIONTIME = JobProgressingTime;
-					//LOG.info("lastDECISIONTIME%%{" + lastDECISIONTIME + "}");
+					LOG.info("lastDECISIONTIME%%{" + lastDECISIONTIME + "}");
 				}
 			}
+			/**
+			 * 自己方法 结束
+			 */
 
-			if (ReduceFinished.containsValue("false")) {
+			
+			//////////////////////////////////////////////////
+			//德国人方法 开始
+			//////////////////////////////////////////////////
+/*			if (JobProgressingTime > 0.4  &&  GerBalance){
+				DecisionModel();
+				GerBalance = false;
+			}*/
+			//////////////////////////////////////////////////
+			//结束
+			//////////////////////////////////////////////////
+			if(EachAssPlan.isEmpty() == false){
 				List<TaskTrackerAction> addNewPartitionList = addMicPartition(trackerName);
 				if (addNewPartitionList != null) {
 					for (TaskTrackerAction ac : addNewPartitionList) {
-						//LOG.info("ac@@" + ac.toString());
+						LOG.info("ac@@" + ac.toString());
 					}
 					actions.addAll(addNewPartitionList);
 				}
+			
 			}
 		}
+		
+
 		/*********************
 		 * add static balance end
 		 ********************/
