@@ -3651,7 +3651,8 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 			 * 自己方法 开始
 			 */
 			if ((UnAssiMicP.isEmpty() == false)
-				&& (((JobProgressingTime - lastDECISIONTIME) >= 0.1) || (JobProgressingTime > 0.9))
+				//&& (((JobProgressingTime - lastDECISIONTIME) >= 0.1) || (JobProgressingTime > 0.9))
+				&& (JobProgressingTime > 0.99)
 				&& (JobInProgress.finishedMapTasks >= 1) && (EachAssPlan.isEmpty())) {
 				if (DecisionModel()) {
 					lastDECISIONTIME = JobProgressingTime;
