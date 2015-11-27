@@ -426,6 +426,11 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 				int mid = (Integer) mpent.getKey();
 				long mval = (Long) mpent.getValue();
 
+				//				if ((JobProgressingTime >= 0.9) && (mval==0)) {
+				//					GlobalSampleTabs.remove(mid);
+				//					continue;
+				//				}
+
 				MicPMes mpm = new MicPMes();
 				//将采样的结果记录到放分区的链表中
 				mpm.micPID = mid;
@@ -510,7 +515,6 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 		LOG.info("###UnAssiMicP.size()_before={" + UnAssiMicP.size() + "}");
 		LOG.info("###UnAssiMicP_before={" + UnAssiMicP + "}");
 		LOG.info("###ReduceLoad_before={" + ReduceLoad + "}");
-		
 
 		long[][] arryUnAssiMicP = new long[2][UnAssiMicP.size()];
 
@@ -566,11 +570,11 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 				pa_values += GlobalSampleTabs.get(i).micPValue;
 			}
 		}
-		//		for (int i = 0; i < 2; i++) {
-		//			for (int j = 0; j < arryUnAssiMicP[1].length; j++) {
-		//				LOG.info("arryUnAssiMicP****[" + i + "][" + j + "]=" + arryUnAssiMicP[i][j] + "  ");
-		//			}
-		//		}
+		for (int i = 0; i < 2; i++) {
+			for (int j = 0; j < arryUnAssiMicP[1].length; j++) {
+				//LOG.info("arryUnAssiMicP****[" + i + "][" + j + "]=" + arryUnAssiMicP[i][j] + "  ");
+			}
+		}
 
 		//(3) 对于未分配的分区计算，取出值函数最大的前n个分区
 		double[] EvalueArray = new double[UnAssiMicP.size()];
@@ -583,7 +587,7 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 		} else {
 			totalTupleNum = Math.round(((double) TotalSampleTuplesNum / (JobProgressingTime - 0.02))); //估算出总的原组数
 		}
-		LOG.info(" totalTupleNum!!!!["+totalTupleNum +"] ");
+		//LOG.info(" totalTupleNum!!!!["+totalTupleNum +"] ");
 
 		long unProTuplesNum = totalTupleNum - TotalSampleTuplesNum; //还未产生的总原组数
 
@@ -594,7 +598,7 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 			double candweigthrate = (double) candvalue / (double) pu_values;  //要分配占所有已产生但未分配的数据总量的比例
 			double candnumrate = (double) candNum / (double) UnAssiMicP.size(); //要分配的个数占总的未分配个数的比例
 			EvalueArray[i] = Double.parseDouble(df.format(candweigthrate - candnumrate));
-			LOG.info(" !!!!{EvalueArray[" + i + "]=" + EvalueArray[i] + "}!!!!");
+			//LOG.info(" !!!!{EvalueArray[" + i + "]=" + EvalueArray[i] + "}!!!!");
 		}
 
 		double maxnume = 0.0;
@@ -655,7 +659,7 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 
 				//更新分配之后的负载量
 				if (eachtaskid == minLID) {
-					partoreduce.add((int)arryUnAssiMicP[0][lo]);
+					partoreduce.add((int) arryUnAssiMicP[0][lo]);
 
 					//更新每次的决策链表
 					if (EachAssPlan.containsKey(eachtaskid)) {
@@ -667,23 +671,24 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 						LinkedList<Integer> eachlist1 = new LinkedList<Integer>();
 						eachlist1.add((int) arryUnAssiMicP[0][lo]);
 						EachAssPlan.put(eachtaskid, eachlist1);
-					} 
+					}
 
 					ReduceLoad.put(eachtaskid, minLoadNodeValue + arryUnAssiMicP[1][lo]); //更新最大负载节点
-					UnAssiMicP.remove((int)arryUnAssiMicP[0][lo]);
-					LOG.info("$$$$assign id={"+arryUnAssiMicP[0][lo]+"}  value={"+arryUnAssiMicP[1][lo]+"}$$$");
-					LOG.info("$$$$remove UnAssiMicP={"+ UnAssiMicP.size() +"}$$$");
-					LOG.info("$$$ReduceLoad_one=id{" + eachtaskid + "}  load={"+ (minLoadNodeValue + arryUnAssiMicP[1][lo]) +"}$$");
+					UnAssiMicP.remove((int) arryUnAssiMicP[0][lo]);
+					//LOG.info("$$$$assign id={"+arryUnAssiMicP[0][lo]+"}  value={"+arryUnAssiMicP[1][lo]+"}$$$");
+					//LOG.info("$$$$remove UnAssiMicP={"+ UnAssiMicP.size() +"}$$$");
+					//LOG.info("$$$ReduceLoad_one=id{" + eachtaskid + "}  load={"+ (minLoadNodeValue + arryUnAssiMicP[1][lo]) +"}$$");
 				}
 			}
 		}
-		LOG.info(" onceAssPNum!!!!after[" + onceAssPNum + "] ");
-
-
-		LOG.info("endMDP#######");
+		//		LOG.info(" onceAssPNum!!!!after[" + onceAssPNum + "] ");
+		//
+		//
+		LOG.info("GlobalSampleTabs#######=" + GlobalSampleTabs + "####");
 		LOG.info("###UnAssiMicP.size()_after={" + UnAssiMicP.size() + "}");
 		LOG.info("###EachAssPlan={" + EachAssPlan + "}");
 		LOG.info("###ReduceLoad_after={" + ReduceLoad + "}");
+		LOG.info("endMDP#######");
 
 		return true;
 	}
@@ -3605,8 +3610,8 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 			 */
 			if ((UnAssiMicP.isEmpty() == false)
 				&& (((JobProgressingTime - lastDECISIONTIME) >= 0.1) || (JobProgressingTime >= 0.95))
-				//&& (JobInProgress.finishedMapTasks >= 1)
-				&& (JobProgressingTime >= 0.2)
+				&& (JobInProgress.finishedMapTasks >= 1)
+				//&& (JobProgressingTime >= 0.2)   //单机调试使用
 				&& (EachAssPlan.isEmpty())) {
 				if (DecisionModel()) {
 					lastDECISIONTIME = JobProgressingTime;
