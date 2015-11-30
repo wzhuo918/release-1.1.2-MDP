@@ -704,58 +704,43 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 		for (TaskAttemptID taskId : taskIds) {
 			// LOG.info(trackerName+"上面运行的taskid是"+taskId);
 			if (taskId.isMap()) {
-				//				JobStatus thisjobstatus = getJobStatus(taskId.getJobID());
-				//				JobProgressingTime = thisjobstatus.mapProgress();
-				continue;
+				return null;
+				//continue;
 			}
 
 			String thisRIdfinished = ReduceFinished.get(taskId);
+			LinkedList<Integer> toArrPart = EachAssPlan.get(taskId);
 
-			//当前reducetask还未完成
-			if (thisRIdfinished.equals("true")) {
-				addPartitionList.add(new AddPartitionAction(taskId, new int[0], true));
-				//LOG.info("addPartitionList_1add@@{" + addPartitionList + "}");
-				continue;
-			} else {
-				LinkedList<Integer> toArrPart = EachAssPlan.get(taskId);
-
-				if (toArrPart == null) {
-					//判断是否整体完成
-					if (AssiMicP.size() == GlobalSampleTabs.size()) {
-						ReduceFinished.put(taskId, "true");
+			//将已完成从分配的从Finished链表中删除；未完成的进行进行任务分配；
+//			if (thisRIdfinished.equals("true")) {
+//				ReduceFinished.remove(taskId);
+//			} else {
+				//如果是最后一轮，将所有的赋值为“true”，否则进行判断
+				if (UnAssiMicP.isEmpty()) {
+					//还有未分配的进行分配后赋值为“true”；本轮没有分配的直接赋值为“true”
+					if(toArrPart == null){
 						addPartitionList.add(new AddPartitionAction(taskId, new int[0], true));
-						//LOG.info("addPartitionList_2add@@{" + ReduceFinished + "}");
-					}
-					continue;
-				} else {
-					for (int i = 0; i < toArrPart.size(); i++) {
-						if (!AssiMicP.contains(toArrPart.get(i))) {
-							AssiMicP.add(toArrPart.get(i));
-							//UnAssiMicP.remove(toArrPart.get(i));
-						}
-						if ((JobProgressingTime == 1.0) && (toArrPart.get(i) == 0)) {
-							AssiMicP.add(toArrPart.get(i));
-							//UnAssiMicP.remove(toArrPart.get(i));
-						}
-					}
-
-					//判断是否整体完成
-					if (AssiMicP.size() == GlobalSampleTabs.size()) {
 						ReduceFinished.put(taskId, "true");
+						ReduceFinished.remove(taskId);
+					}else{
 						addPartitionList.add(new AddPartitionAction(taskId, toArrPart, true));
-						//LOG.info("addPartitionList_3add@@" + addPartitionList);
-						//LOG.info("AssiMicP.size()={" + AssiMicP.size() + "}{" + GlobalSampleTabs.size() + "}");
-					} else {
-						addPartitionList.add(new AddPartitionAction(taskId, toArrPart, false));
-						//LOG.info("addPartitionList_4add@@" + addPartitionList);
-						//LOG.info("AssiMicP.size()={" + AssiMicP.size() + "}{" + GlobalSampleTabs.size() + "}");
+						ReduceFinished.put(taskId, "true");
+						ReduceFinished.remove(taskId);
 					}
-					EachAssPlan.remove(taskId);
-					//return addPartitionList;
+				} else {
+					if(toArrPart == null){
+						addPartitionList.add(new AddPartitionAction(taskId, new int[0], false));
+						ReduceFinished.put(taskId, "false");
+					}else{
+						addPartitionList.add(new AddPartitionAction(taskId, toArrPart, false));
+						ReduceFinished.put(taskId, "false");
+					}
 				}
-			}
-			return addPartitionList;
+			//}
+			EachAssPlan.remove(taskId);
+			//return addPartitionList;
 		}
+		
 		return addPartitionList;
 	}
 
@@ -3635,15 +3620,14 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 			//结束
 			//////////////////////////////////////////////////
 			//ReduceFinished.containsValue("false")   EachAssPlan.isEmpty() == false 
-			if (ReduceFinished.containsValue("false")) {
+			if ((ReduceFinished.isEmpty()==false) && (EachAssPlan.isEmpty() == false)) {
 				List<TaskTrackerAction> addNewPartitionList = addMicPartition(trackerName);
 				if (addNewPartitionList != null) {
-					for (TaskTrackerAction ac : addNewPartitionList) {
-						LOG.info("ac@@" + ac.toString());
-					}
-					actions.addAll(addNewPartitionList);
+				for (TaskTrackerAction ac : addNewPartitionList) {
+					LOG.info("ac@@" + ac.toString());
 				}
-
+				actions.addAll(addNewPartitionList);
+				}
 			}
 		}
 
