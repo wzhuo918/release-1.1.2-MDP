@@ -325,7 +325,8 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 	public long TotalSampleTuplesNum = 0;
 	public static int TotalReduceNum = 0;
 	public static double lastDECISIONTIME = 0.0;
-	public static boolean GerBalance = true;
+	//public static boolean GerBalance = true;
+	//public static boolean AllReduceFished = false;
 
 	//用于表示采样信息所在节点的链表
 	public List<String> TaskNameList = new LinkedList<String>();
@@ -426,11 +427,6 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 				int mid = (Integer) mpent.getKey();
 				long mval = (Long) mpent.getValue();
 
-				//				if ((JobProgressingTime >= 0.9) && (mval==0)) {
-				//					GlobalSampleTabs.remove(mid);
-				//					continue;
-				//				}
-
 				MicPMes mpm = new MicPMes();
 				//将采样的结果记录到放分区的链表中
 				mpm.micPID = mid;
@@ -474,7 +470,6 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 			if ((micmes.micPValue == 0)) {
 				AssiMicP.add(micid);
 				UnAssiMicP.remove(micid);
-				//AssiMicP && JobProgressingTime>0.9
 				//LOG.info("UnAssiMicP.remove={"+ micid+"}");
 				//LOG.info("AssiMicP.add={"+ micid+"}");
 			}
@@ -511,10 +506,10 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 		//      （4） 按照贪心策略进行分配分区（向最小负载节点分配）；
 		//
 		//////////////////////////////////////////////////
-		LOG.info("beginMDP#######");
-		LOG.info("###UnAssiMicP.size()_before={" + UnAssiMicP.size() + "}");
-		LOG.info("###UnAssiMicP_before={" + UnAssiMicP + "}");
-		LOG.info("###ReduceLoad_before={" + ReduceLoad + "}");
+		//LOG.info("beginMDP#######");
+		//LOG.info("###UnAssiMicP.size()_before={" + UnAssiMicP.size() + "}");
+		//LOG.info("###UnAssiMicP_before={" + UnAssiMicP + "}###");
+		//LOG.info("###ReduceLoad_before={" + ReduceLoad + "}");
 
 		long[][] arryUnAssiMicP = new long[2][UnAssiMicP.size()];
 
@@ -589,7 +584,7 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 		}
 		//LOG.info(" totalTupleNum!!!!["+totalTupleNum +"] ");
 
-		long unProTuplesNum = totalTupleNum - TotalSampleTuplesNum; //还未产生的总原组数
+		//long unProTuplesNum = totalTupleNum - TotalSampleTuplesNum; //还未产生的总原组数
 
 		for (int i = 0; i < arryUnAssiMicP[0].length; i++) {
 			candvalue += arryUnAssiMicP[1][i];
@@ -644,6 +639,8 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 				TaskAttemptID onereuceid = (TaskAttemptID) oneloadent.getKey();
 				Long oneredload = (Long) oneloadent.getValue();
 				if (oneredload < minLoadNodeValue) {
+					//注释语句，防止出现一个key未空的情况，已解决，无需
+					//if ((oneredload < minLoadNodeValue) && (oneredload != 0)) {
 					minLoadNodeValue = oneredload;
 					minLID = onereuceid;
 				}
@@ -681,66 +678,90 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 				}
 			}
 		}
-		//		LOG.info(" onceAssPNum!!!!after[" + onceAssPNum + "] ");
-		//
-		//
-		LOG.info("GlobalSampleTabs#######=" + GlobalSampleTabs + "####");
-		LOG.info("###UnAssiMicP.size()_after={" + UnAssiMicP.size() + "}");
-		LOG.info("###EachAssPlan={" + EachAssPlan + "}");
-		LOG.info("###ReduceLoad_after={" + ReduceLoad + "}");
-		LOG.info("endMDP#######");
+		//LOG.info("GlobalSampleTabs#######=" + GlobalSampleTabs + "####");
+		//LOG.info("###UnAssiMicP.size()_after={" + UnAssiMicP.size() + "}");
+		//LOG.info("###EachAssPlan={" + EachAssPlan + "}###");
+		//LOG.info("###ReduceLoad_after={" + ReduceLoad + "}");
+		//LOG.info("endMDP#######");
 
 		return true;
 	}
 
-	//4.将决策后的链表添加到获取分区的动作中，每次取出属于该task的所有分区
+	//4.将决策后的链表添加到获取分区的动作中，每次将该节点上所有的Reduce添加到该机器节点上
 	private List<TaskTrackerAction> addMicPartition(String trackerName) {
+		//trackerName是机器名，因为通信是通过节点上的Task进行通信的
+
+		//LOG.info("assign_EachAssPlan@@={" + EachAssPlan + "}");
 		//返回属于该trackerName的所有新增分区链表
 		List<TaskTrackerAction> addPartitionList = new ArrayList<TaskTrackerAction>();
+		//运行在该节点上所有的task名字，包括Map和Reduce task
 		Set<TaskAttemptID> taskIds = trackerToTaskMap.get(trackerName);
 
-		if (taskIds == null)
+		//LOG.info("!!! trackerName={" + trackerName + "} ");
+		//LOG.info(" taskIds={" + taskIds + "} !!!!");
+
+		if (taskIds == null) {
 			return null;
+		}
+
+		//取出该节点上的所有Reduce 分区
 		for (TaskAttemptID taskId : taskIds) {
-			// LOG.info(trackerName+"上面运行的taskid是"+taskId);
+			//忽略所有MapTask
 			if (taskId.isMap()) {
-				return null;
-				//continue;
+				continue;
 			}
 
-			String thisRIdfinished = ReduceFinished.get(taskId);
-			LinkedList<Integer> toArrPart = EachAssPlan.get(taskId);
+			//如果该reduce task尚未被分配
+			if (ReduceFinished.containsKey(taskId)) {
 
-			//将已完成从分配的从Finished链表中删除；未完成的进行进行任务分配；
-//			if (thisRIdfinished.equals("true")) {
-//				ReduceFinished.remove(taskId);
-//			} else {
-				//如果是最后一轮，将所有的赋值为“true”，否则进行判断
-				if (UnAssiMicP.isEmpty()) {
-					//还有未分配的进行分配后赋值为“true”；本轮没有分配的直接赋值为“true”
-					if(toArrPart == null){
-						addPartitionList.add(new AddPartitionAction(taskId, new int[0], true));
-						ReduceFinished.put(taskId, "true");
-						ReduceFinished.remove(taskId);
-					}else{
-						addPartitionList.add(new AddPartitionAction(taskId, toArrPart, true));
-						ReduceFinished.put(taskId, "true");
-						ReduceFinished.remove(taskId);
-					}
+				//取出该ReduceTask的分配计划和状态
+				String thisRIdfinished = ReduceFinished.get(taskId);
+				LinkedList<Integer> toArrPart = EachAssPlan.get(taskId);
+				//LOG.info("&&&& taskId={" + taskId + "} ");
+				//LOG.info(" thisRIdfinished={" + thisRIdfinished + "} ");
+				//LOG.info(" ReduceId_LinkedList={" + toArrPart + "}&&&&");
+
+				//将已完成从分配的从Finished链表中删除；未完成的进行进行任务分配；
+				if (thisRIdfinished.equals("true")) {
+					ReduceFinished.remove(taskId);
+					//LOG.info(" %%%removetaskId={" + taskId + "}%%%%");
 				} else {
-					if(toArrPart == null){
-						addPartitionList.add(new AddPartitionAction(taskId, new int[0], false));
-						ReduceFinished.put(taskId, "false");
-					}else{
-						addPartitionList.add(new AddPartitionAction(taskId, toArrPart, false));
-						ReduceFinished.put(taskId, "false");
+					//如果是最后一轮，将所有的赋值为“true”，否则进行判断
+					if (UnAssiMicP.isEmpty()) {
+						//还有未分配的进行分配后赋值为“true”；本轮没有分配的直接赋值为“true”
+						if (toArrPart != null) {
+							addPartitionList.add(new AddPartitionAction(taskId, toArrPart, true));
+							ReduceFinished.put(taskId, "true");
+							EachAssPlan.remove(taskId);
+							//LOG.info("111={" + addPartitionList + "} ");
+						} else {
+							addPartitionList.add(new AddPartitionAction(taskId, new int[0], true));
+							ReduceFinished.put(taskId, "true");
+							EachAssPlan.remove(taskId);
+							//LOG.info("222={" + addPartitionList + "} ");
+						}
+					} else {
+
+						//在还没有将所有的分区分配完前，但又没有分配计划时，进行跳出
+						if (EachAssPlan.isEmpty()) {
+							break;
+						}
+
+						if (toArrPart == null) {
+							//addPartitionList.add(new AddPartitionAction(taskId, new int[0], false));
+							ReduceFinished.put(taskId, "false");
+							EachAssPlan.remove(taskId);
+							//LOG.info("333={" + addPartitionList + "} ");
+						} else {
+							addPartitionList.add(new AddPartitionAction(taskId, toArrPart, false));
+							ReduceFinished.put(taskId, "false");
+							EachAssPlan.remove(taskId);
+							//LOG.info("444={" + addPartitionList + "} ");
+						}
 					}
 				}
-			//}
-			EachAssPlan.remove(taskId);
-			//return addPartitionList;
+			}
 		}
-		
 		return addPartitionList;
 	}
 
@@ -2160,6 +2181,7 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 	TreeMap<TaskAttemptID, String> taskidToTrackerMap = new TreeMap<TaskAttemptID, String>();
 
 	// (trackerID->TreeSet of taskids running at that tracker)
+	//<task所在node的机器名，后面是在该节点上的所有M/R task name>
 	TreeMap<String, Set<TaskAttemptID>> trackerToTaskMap = new TreeMap<String, Set<TaskAttemptID>>();
 
 	// (trackerID -> TreeSet of completed taskids running at that tracker)
@@ -3578,56 +3600,58 @@ public class JobTracker implements MRConstants, InterTrackerProtocol, JobSubmiss
 					ReduceFinished.put(onetaskId, "false");
 					//初始化reduce的负载矩阵
 					ReduceLoad.put(onetaskId, (long) 0);
-					//LOG.info("UnAssiMicP_before={" + UnAssiMicP+"} ");
-					//LOG.info("UnAssiMicP_size={" + UnAssiMicP.size()+"} ");
+					//LOG.info("!!!!UnAssiMicP_before={" + UnAssiMicP+"} ");
+					//LOG.info("ReduceCoMicPs={" + ReduceCoMicPs+"} !!!!");
 					//LOG.info("TotalReduceNum)" + TotalReduceNum);
 				}
 
 			}// for
 		} //end if
 
-		//如果该maptask还没有被分配，并且运行到该task的80%
-		if ((TotalReduceNum == ReduceCoMicPs.size()) && (ReduceCoMicPs.size() != 0)) {
-			//LOG.info("TotalReduceNum%%{" + TotalReduceNum + "}"); JobInProgress.finishedMapTasks >= 1
-			/**
-			 * JobInProgress.finishedMapTasks == JobInProgress.numMapTasks
-			 * 自己方法 开始
-			 */
-			if ((UnAssiMicP.isEmpty() == false)
-				&& (((JobProgressingTime - lastDECISIONTIME) >= 0.1) || (JobProgressingTime >= 0.95))
-				&& (JobInProgress.finishedMapTasks >= 1)
-				//&& (JobProgressingTime >= 0.2)   //单机调试使用
-				&& (EachAssPlan.isEmpty())) {
-				if (DecisionModel()) {
-					lastDECISIONTIME = JobProgressingTime;
-					LOG.info("lastDECISIONTIME%%{" + lastDECISIONTIME + "}");
-				}
+		//if ((TotalReduceNum == ReduceCoMicPs.size()) && (ReduceCoMicPs.size() != 0)) {
+		//LOG.info("TotalReduceNum%%{" + TotalReduceNum + "}"); JobInProgress.finishedMapTasks >= 1
+		/**
+		 * JobInProgress.finishedMapTasks == JobInProgress.numMapTasks
+		 * 自己方法 开始
+		 */
+		//如果初始化完成，并且都还没分配完，进行决策和添加分配计划
+		//if ((ReduceFinished.isEmpty() == false) && (ReduceFinished.containsValue("false"))) {
+		//进行分区分配的决策
+		if ((UnAssiMicP.isEmpty() == false) && (TotalReduceNum == ReduceCoMicPs.size())
+			&& (((JobProgressingTime - lastDECISIONTIME) >= 0.1) || (JobProgressingTime >= 0.95))
+			&& (JobInProgress.finishedMapTasks >= 1)
+			//&& (JobProgressingTime >= 0.2)   //单机调试使用
+			&& (EachAssPlan.isEmpty())) {
+			//LOG.info("before_lastDECISIONTIME%%{" + JobProgressingTime + "}");
+			if (DecisionModel()) {
+				lastDECISIONTIME = JobProgressingTime;
+				//LOG.info("lastDECISIONTIME%%{" + lastDECISIONTIME + "}");
 			}
-			/**
-			 * 自己方法 结束
-			 */
+		}
+		/**
+		 * 自己方法 结束
+		 */
 
-			//////////////////////////////////////////////////
-			//德国人方法 开始
-			//////////////////////////////////////////////////
-			/*
-			 * if (JobProgressingTime > 0.4 && GerBalance){
-			 * DecisionModel();
-			 * GerBalance = false;
-			 * }
-			 */
-			//////////////////////////////////////////////////
-			//结束
-			//////////////////////////////////////////////////
-			//ReduceFinished.containsValue("false")   EachAssPlan.isEmpty() == false 
-			if ((ReduceFinished.isEmpty()==false) && (EachAssPlan.isEmpty() == false)) {
-				List<TaskTrackerAction> addNewPartitionList = addMicPartition(trackerName);
-				if (addNewPartitionList != null) {
+		//////////////////////////////////////////////////
+		//德国人方法 开始
+		//////////////////////////////////////////////////
+		/*
+		 * if (JobProgressingTime > 0.4 && GerBalance){
+		 * DecisionModel();
+		 * GerBalance = false;
+		 * }
+		 */
+		//////////////////////////////////////////////////
+		//结束
+		//////////////////////////////////////////////////
+		//ReduceFinished.containsValue("false")   EachAssPlan.isEmpty() == false 
+		if (ReduceFinished.containsValue("false")) {
+			List<TaskTrackerAction> addNewPartitionList = addMicPartition(trackerName);
+			if (addNewPartitionList != null) {
 				for (TaskTrackerAction ac : addNewPartitionList) {
 					LOG.info("ac@@" + ac.toString());
 				}
 				actions.addAll(addNewPartitionList);
-				}
 			}
 		}
 
